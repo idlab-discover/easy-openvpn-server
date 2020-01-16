@@ -1,0 +1,42 @@
+name: easy-openvpn-server
+title: Easy OpenVPN Server
+version: "0.1"
+summary: A dead-simple OpenVPN server.
+description: | 
+  A dead-simple OpenVPN server.
+license: Apache-2.0
+
+base: core18
+grade: stable
+confinement: strict
+
+apps:
+  easy-openvpn-server:
+    command: bin/run.sh
+    daemon: simple
+    plugs:
+      - network
+      - network-bind
+      - network-control
+      - firewall-control
+  setup:
+    command: bin/setup.py $SNAP_USER_DATA
+
+
+parts:
+  openvpn:
+    plugin: nil
+    stage-packages:
+      - openvpn
+      - iptables
+      - libatm1
+  scripts:
+    plugin: dump
+    source: scripts
+    organize:
+      "*": bin/
+  python-dependencies:
+    plugin: python
+    source: easy-openvpn-server
+    requirements:
+      - requirements.txt 
