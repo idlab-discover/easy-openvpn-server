@@ -21,6 +21,14 @@ apps:
       - firewall-control
   setup:
     command: bin/setup.py $SNAP_USER_DATA
+    plugs:
+      - network
+      - network-observe
+  facter:
+    command: usr/bin/facter
+    plugs:
+      - network
+      - network-observe
 
 
 parts:
@@ -35,6 +43,15 @@ parts:
     source: scripts
     organize:
       "*": bin/
+  scripts-dependencies:
+    plugin: nil
+    stage-packages:
+      - facter
+  templates:
+    plugin: dump
+    source: templates
+    organize:
+      "*": templates/
   python-dependencies:
     plugin: python
     source: easy-openvpn-server

@@ -7,6 +7,10 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import (serialization, hashes)
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+from ipaddress import IPv4Address, ip_network
+import json
+import random
+import subprocess
 import sys
 
 def create_ca(result_dir):
@@ -109,12 +113,183 @@ def create_cert(ca_key, issuer, result_dir):
         f.write(cert.public_bytes(serialization.Encoding.PEM))
 
 
+
+
+
+
+
+
+
+def facter(argument=None):
+    ''' return output of `facter` as a dict
+    '''
+    output = subprocess.check_output(["facter", '-j', argument],
+                                     universal_newlines=True)
+    return json.loads(output)
+
+def get_extip_and_networks():
+    '''returns public ip. If no ip of server is public, it returns ip from
+    `facter`
+    '''
+    net_info = facter('networking')
+    ext_ip = None
+    internal_networks = []
+    for iface, content in net_info['networking']['interfaces'].items():
+        if not any(bl_iface in iface for bl_iface in ['lo', 'tun']):
+            for binding in content.get('bindings', []):
+                address = IPv4Address(binding['address'])
+                #
+                # GET PUBLIC IP
+                # Can't use is_global in 14.04 because of following bug:
+                # https://bugs.python.org/issue21386
+                if not address.is_private:
+                    ext_ip = address
+    if not ext_ip:
+        ext_ip = net_info['networking']['ip']
+    # TODO: do we need similar logic?
+    # # If public-address is different from private-address, we're probably in a
+    # # juju-supported cloud that we can trust to give us the right address that
+    # # clients need to use to connect to us. If not, just use ext_ip.
+    # if unit_get('private-address') != unit_get('public-address'):
+    #     pub_ip = unit_get('public-address')
+    # else:
+    pub_ip = ext_ip
+    print("External IP according to get_extip logic: {}".format(ext_ip))
+    print("Public IP according to get_extip logic: {}".format(pub_ip))
+
+    internal_networks = []
+    pub_ip_obj = IPv4Address(pub_ip)
+    ext_ip_obj = IPv4Address(ext_ip)
+    for network in get_networks(remove_tunnels=True):
+        if pub_ip_obj in network or ext_ip_obj in network:
+            continue
+        internal_networks.append("{} {}".format(
+            network.network_address,
+            network.netmask))
+    print("Routes to push according to logic: {}".format(internal_networks))
+    return {
+        # IP of local interface that clients connect to.
+        "external-ip": ext_ip,
+        # IP that remote clients will use to connect to. This is identical to
+        # external-ip except when Juju provides us with
+        "public-ip": pub_ip,
+        "internal-networks": internal_networks,
+    }
+
+
+def get_dns_info():
+    info = {}
+    with open('/etc/resolv.conf', 'r') as resolv_file:
+        content = resolv_file.readlines()
+    for line in content:
+        words = line.split()
+        if len(words) > 1:
+            if words[0] == "nameserver":
+                info['nameserver'] = words[1]
+            elif words[0] == "search":
+                info['search'] = words[1:]
+    return info
+
+
+def get_networks(remove_tunnels=False):
+    '''Returns a list with Ip Networks that are in use
+    '''
+    networks = []
+    output = subprocess.check_output(['ip', 'route', 'show'], universal_newlines=True)
+    for line in output.splitlines():
+        # Skip all tunnel and VPN-connected networks
+        if remove_tunnels and ("tun" in line):
+            continue
+        words = line.split()
+        # Skip default gateways
+        if words[0] == "default":
+            continue
+        networks.append(ip_network(words[0]))
+    return networks
+
+
+def get_tun_network():
+    '''Return a random network for tun interface
+    '''
+    a_class = ip_network('10.0.0.0/255.0.0.0')
+    nets = get_networks()
+    available_networks = [a_class]
+    for network in nets:
+        updated = []
+        for a_net in available_networks:
+            try:
+                net_iter = a_net.address_exclude(network)
+                for n in net_iter:
+                    updated.append(n)
+            except ValueError:
+                pass
+        if updated:
+            available_networks = updated
+    if len(available_networks) == 0:
+        print('ERROR: Could not find available server network')
+
+    subnets = []
+    for a_net in available_networks:
+        try:
+            subs = a_net.subnets(new_prefix=24)
+            subnets.extend(subs)
+        except ValueError:
+            pass
+
+    rand_ip = str(random.choice(subnets))
+    return rand_ip.split('/')[0]
+
+
+def generate_config(result_dir):
+    dns_info = get_dns_info()
+    # clients = conf['clients'].split()
+    eipndict = get_extip_and_networks()
+    ext_ip = eipndict['external-ip']
+    pub_ip = eipndict['public-ip']
+    internal_networks = eipndict['internal-networks']
+    context = {
+        'servername': "easy-openvpn-server-1",
+        'protocol': "tcp-server",
+        'port': "443",
+        'duplicate_cn': True,
+        'push_dns': True,
+        'push_default_gateway': True,
+        'dns_server': dns_info.get('nameserver', "8.8.8.8"),
+        'dns_search_domains': dns_info.get('search', []),
+        'ext_ip': ext_ip,
+        'pub_ip': pub_ip,
+        'internal_networks': internal_networks,
+        'serverip': get_tun_network(),
+        'servernetmask': '255.255.255.0',
+        'serverslashmask': '24',
+    }
+
+    from jinja2 import Environment, FileSystemLoader
+    j2_env = Environment(loader=FileSystemLoader('templates'),                                                                                                                            
+                         trim_blocks=True)
+    template = j2_env.get_template('server.conf')
+
+    print(template.render(
+        output=result_dir,
+        **context))
+
+
+
+
+
+
+
+
+
+
+
+
+
 if (len(sys.argv) > 1):
     result_dir = sys.argv[1]
     ca_key, issuer = create_ca(result_dir)
     create_cert(ca_key, issuer, result_dir)
+    generate_config(result_dir)
 else:
     print("ERROR: please specify the result directory.")
     exit(1)
-
-
