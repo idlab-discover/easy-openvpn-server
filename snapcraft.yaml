@@ -29,7 +29,13 @@ apps:
     plugs:
       - network
       - network-observe
-
+  openvpn:
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
+    plugs:
+      - network
+      - network-bind
+      - network-control
+      - firewall-control
 
 parts:
   openvpn:

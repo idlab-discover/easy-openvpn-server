@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 
 import datetime
+import errno
+from ipaddress import IPv4Address, ip_network
+import json
+import os
+import random
+import stat
+import subprocess
+import sys
+
 import cryptography
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import (serialization, hashes)
+from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from ipaddress import IPv4Address, ip_network
-import json
-import random
-import subprocess
-import sys
+from jinja2 import Environment, FileSystemLoader
+
 
 def create_ca(result_dir):
     # Generate our key
@@ -30,6 +37,8 @@ def create_ca(result_dir):
             # TODO: figure out if we can make this a bit more secure
             # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
         ))
+    # Make sure other users can't read out private key
+    os.chmod("{}/ca.key".format(result_dir), stat.S_IRUSR | stat.S_IWUSR )
 
     # Various details about who we are. For a self-signed certificate the
     # subject and issuer are always the same.
@@ -60,7 +69,6 @@ def create_ca(result_dir):
     # Write our certificate out to disk.
     with open("{}/ca.crt".format(result_dir), "wb") as f:
         f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-
     return (ca_key, issuer)
 
 
@@ -80,6 +88,8 @@ def create_cert(ca_key, issuer, result_dir):
             encryption_algorithm=serialization.NoEncryption(),
             # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
         ))
+    # Make sure other users can't read out private key
+    os.chmod("{}/server.key".format(result_dir), stat.S_IRUSR | stat.S_IWUSR )
 
     # Various details about who we are.
     subject = x509.Name([
@@ -112,11 +122,17 @@ def create_cert(ca_key, issuer, result_dir):
     with open("{}/server.crt".format(result_dir), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
 
+def create_dh_params(result_dir):
+    if not os.path.isfile("{}/dh4096.pem".format(result_dir)):
+        parameters = dh.generate_parameters(generator=2, key_size=2048,
+                                            backend=default_backend())
+        # Write the dh parameters to disk.
+        with open("{}/dh4096.pem".format(result_dir), "wb") as f:
+            f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
 
-
-
-
-
+def generate_psk(result_dir):
+    if not os.path.isfile("{}/ta.key".format(result_dir)):
+        subprocess.check_call(["openvpn", "--genkey", "--secret", "{}/ta.key".format(result_dir)])
 
 
 
@@ -248,6 +264,8 @@ def generate_config(result_dir):
     pub_ip = eipndict['public-ip']
     internal_networks = eipndict['internal-networks']
     context = {
+        'config_dir': '.',
+        'data_dir': '.',
         'servername': "easy-openvpn-server-1",
         'protocol': "tcp-server",
         'port': "443",
@@ -263,18 +281,22 @@ def generate_config(result_dir):
         'servernetmask': '255.255.255.0',
         'serverslashmask': '24',
     }
-
-    from jinja2 import Environment, FileSystemLoader
-    j2_env = Environment(loader=FileSystemLoader('templates'),                                                                                                                            
-                         trim_blocks=True)
+    j2_env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        trim_blocks=True,
+        lstrip_blocks=True)
     template = j2_env.get_template('server.conf')
-
-    print(template.render(
-        output=result_dir,
-        **context))
-
+    output = template.render(output=result_dir, **context)
+    with open('{}/server.conf'.format(result_dir), 'w') as f:
+        f.write(output)
 
 
+def create_client_configs(result_dir):
+    try:
+        os.makedirs("{}/client-configs".format(result_dir))
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
 
 
 
@@ -289,7 +311,10 @@ if (len(sys.argv) > 1):
     result_dir = sys.argv[1]
     ca_key, issuer = create_ca(result_dir)
     create_cert(ca_key, issuer, result_dir)
+    create_dh_params(result_dir)
+    generate_psk(result_dir)
     generate_config(result_dir)
+    create_client_configs(result_dir)
 else:
     print("ERROR: please specify the result directory.")
     exit(1)
