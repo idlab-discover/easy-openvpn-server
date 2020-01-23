@@ -264,6 +264,7 @@ def create_client_config(result_dir, name):
 
 
 def create_dh_params(result_dir):
+    print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
     if not os.path.isfile("{}/dh4096.pem".format(result_dir)):
         parameters = dh.generate_parameters(generator=2, key_size=2048,
                                             backend=default_backend())
@@ -435,7 +436,7 @@ def generate_config(result_dir):
 
 def generate_init_script(result_dir):
     context = {
-        'ovpn_network': SERVERIP,
+        'ovpn_network': "{}/24".format(SERVERIP),
     }
     j2_env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
