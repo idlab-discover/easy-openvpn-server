@@ -72,7 +72,7 @@ def create_ca(result_dir):
     # Write our certificate out to disk.
     with open("{}/ca.crt".format(result_dir), "wb") as f:
         f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-    return (ca_key, issuer)
+    return (ca_key, ca_cert, issuer)
 
 
 def create_cert(ca_key, issuer, result_dir):
@@ -117,6 +117,9 @@ def create_cert(ca_key, issuer, result_dir):
         # Our certificate will be valid for about 100 years
         datetime.datetime.utcnow() + datetime.timedelta(days=36500)
     ).add_extension(
+    #     x509.ExtendedKeyUsage("serverAuth"),
+    #     critical=False,
+    # ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
         critical=False,
     # Sign our certificate with given ca key
@@ -124,6 +127,104 @@ def create_cert(ca_key, issuer, result_dir):
     # Write our certificate out to disk.
     with open("{}/server.crt".format(result_dir), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+
+def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
+    # Generate our key
+    key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+
+    # Write our key to disk for safe keeping
+    with open("{}/client-configs/{}.key".format(result_dir, client_name), "wb") as f:
+        f.write(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+            # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
+        ))
+    # Make sure other users can't read out private key
+    os.chmod("{}/client-configs/{}.key".format(result_dir, client_name), stat.S_IRUSR | stat.S_IWUSR )
+
+    # Various details about who we are.
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
+        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
+        x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"My Company"),
+        x509.NameAttribute(NameOID.COMMON_NAME, client_name),
+    ])
+
+    cert = x509.CertificateBuilder().subject_name(
+        subject
+    ).issuer_name(
+        issuer
+    ).public_key(
+        key.public_key()
+    ).serial_number(
+        x509.random_serial_number()
+    ).not_valid_before(
+        datetime.datetime.utcnow()
+    ).not_valid_after(
+        # Our certificate will be valid for about 100 years
+        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+    ).add_extension(
+        x509.BasicConstraints(ca=False, path_length=None),
+        critical=False,
+    # ).add_extension(
+    #     x509.ExtendedKeyUsage("clientAuth"),
+    #     critical=False,
+    # Sign our certificate with given ca key
+    ).sign(ca_key, hashes.SHA256(), default_backend())
+    # Write our certificate out to disk.
+    with open("{}/client-configs/{}.crt".format(result_dir, client_name), "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))    
+
+    #
+    #
+    # GENERATE CONFIG FILES
+    #
+    #
+    #
+    with open("{}/ca.crt".format(result_dir)) as f:
+        ca_cert_srt = f.read()
+    with open("{}/client-configs/{}.crt".format(result_dir, client_name)) as f:
+        client_cert_str = f.read()
+    with open("{}/client-configs/{}.key".format(result_dir, client_name)) as f:
+        client_key_str = f.read()
+    with open("{}/ta.key".format(result_dir)) as f:
+        ta_key_str = f.read()
+
+    eipndict = get_extip_and_networks()
+    pub_ip = eipndict['public-ip']
+    context = {
+        'protocol': "tcp",
+        'address': pub_ip,
+        'port': "443",
+        'ca': ca_cert_srt,
+        'cert': client_cert_str,
+        'key': client_key_str,
+        'tls_auth': ta_key_str,
+    }
+    j2_env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        trim_blocks=True,
+        lstrip_blocks=True)
+    template = j2_env.get_template('client.ovpn')
+    output = template.render(output=result_dir, **context)
+    with open("{}/client-configs/{}.ovpn".format(result_dir, client_name), 'w') as f:
+        f.write(output)
+
+
+
+
+
+
+
+
+
 
 def create_dh_params(result_dir):
     if not os.path.isfile("{}/dh4096.pem".format(result_dir)):
@@ -299,8 +400,10 @@ def create_status_file(result_dir):
     status_path.touch()
     uid = pwd.getpwnam("snap_daemon").pw_uid
     gid = grp.getgrnam("snap_daemon").gr_gid
-    os.chown(status_path, uid, gid)
-
+    try:
+        os.chown(status_path, uid, gid)
+    except:
+        pass
 
 def create_client_configs(result_dir):
     try:
@@ -320,11 +423,12 @@ def create_client_configs(result_dir):
 
 if (len(sys.argv) > 1):
     result_dir = sys.argv[1]
-    ca_key, issuer = create_ca(result_dir)
+    ca_key, ca_cert, issuer = create_ca(result_dir)
     create_cert(ca_key, issuer, result_dir)
     create_dh_params(result_dir)
     generate_psk(result_dir)
     generate_config(result_dir)
+    create_client_cert(result_dir, ca_key, ca_cert, issuer, "client42")
     create_status_file(result_dir)
     create_client_configs(result_dir)
 else:
