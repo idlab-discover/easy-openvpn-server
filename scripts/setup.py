@@ -2,9 +2,12 @@
 
 import datetime
 import errno
+import grp
 from ipaddress import IPv4Address, ip_network
 import json
 import os
+from pathlib import Path
+import pwd
 import random
 import stat
 import subprocess
@@ -291,6 +294,14 @@ def generate_config(result_dir):
         f.write(output)
 
 
+def create_status_file(result_dir):
+    status_path = Path('{}/openvpn-server1-status.log'.format(result_dir))
+    status_path.touch()
+    uid = pwd.getpwnam("snap_daemon").pw_uid
+    gid = grp.getgrnam("snap_daemon").gr_gid
+    os.chown(status_path, uid, gid)
+
+
 def create_client_configs(result_dir):
     try:
         os.makedirs("{}/client-configs".format(result_dir))
@@ -314,6 +325,7 @@ if (len(sys.argv) > 1):
     create_dh_params(result_dir)
     generate_psk(result_dir)
     generate_config(result_dir)
+    create_status_file(result_dir)
     create_client_configs(result_dir)
 else:
     print("ERROR: please specify the result directory.")

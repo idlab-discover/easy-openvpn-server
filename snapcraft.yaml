@@ -10,6 +10,10 @@ base: core18
 grade: stable
 confinement: strict
 
+passthrough:
+  system-usernames:
+    snap_daemon: shared
+
 apps:
   easy-openvpn-server:
     command: bin/run.sh
@@ -36,6 +40,8 @@ apps:
       - network-bind
       - network-control
       - firewall-control
+    environment:
+      LD_PRELOAD: "$SNAP/wraplib.so"
 
 parts:
   openvpn:
@@ -50,7 +56,10 @@ parts:
     organize:
       "*": bin/
   scripts-dependencies:
-    plugin: nil
+    plugin: python
+    source: easy-openvpn-server
+    requirements:
+      - requirements.txt 
     stage-packages:
       - facter
   templates:
@@ -58,8 +67,8 @@ parts:
     source: templates
     organize:
       "*": templates/
-  python-dependencies:
-    plugin: python
-    source: easy-openvpn-server
-    requirements:
-      - requirements.txt 
+  setgroups-patch:
+    plugin: make
+    source: setgroups-patch
+    build-packages:
+      - build-essential
