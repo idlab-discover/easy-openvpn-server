@@ -19,6 +19,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import (serialization, hashes)
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.x509.oid import NameOID
 from jinja2 import Environment, FileSystemLoader
 
@@ -103,6 +104,8 @@ def create_cert(ca_key, issuer, result_dir):
         x509.NameAttribute(NameOID.COMMON_NAME, u"mysite.com"),
     ])
 
+
+
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(
@@ -117,9 +120,26 @@ def create_cert(ca_key, issuer, result_dir):
         # Our certificate will be valid for about 100 years
         datetime.datetime.utcnow() + datetime.timedelta(days=36500)
     ).add_extension(
-    #     x509.ExtendedKeyUsage("serverAuth"),
-    #     critical=False,
-    # ).add_extension(
+        # Make it clear this is a server key.
+        # More explanation:
+        #  - https://www.v13.gr/blog/?p=386
+        #  - https://forums.openvpn.net/viewtopic.php?t=7484
+        x509.KeyUsage(
+            digital_signature=True,
+            content_commitment=False,
+            key_encipherment=True,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=False,
+            crl_sign=False,
+            encipher_only=False,
+            decipher_only=False,
+        ),
+        critical=True,
+    ).add_extension(
+        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+        critical=True,
+    ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
         critical=False,
     # Sign our certificate with given ca key
@@ -128,6 +148,9 @@ def create_cert(ca_key, issuer, result_dir):
     with open("{}/server.crt".format(result_dir), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
 
+    # x509.KeyUsage()
+
+    # x509.KeyUsage(digital_signature=True, key_encipherment=True)
 
 def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
     # Generate our key
@@ -173,26 +196,40 @@ def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
     ).add_extension(
         x509.BasicConstraints(ca=False, path_length=None),
         critical=False,
-    # ).add_extension(
-    #     x509.ExtendedKeyUsage("clientAuth"),
-    #     critical=False,
-    # Sign our certificate with given ca key
+    ).add_extension(
+        # Make sure this key can only be used for clients
+        # This is to prevent man-in-the-middle attack
+        # with client certificate.
+        # More info:
+        #  - https://openvpn.net/community-resources/how-to
+        #  - https://openvpn.net/community-resources/reference-manual-for-openvpn-2-4/
+        x509.KeyUsage(
+            digital_signature=True,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=False,
+            crl_sign=False,
+            encipher_only=False,
+            decipher_only=False,
+        ),
+        critical=True,
+    ).add_extension(
+        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+        critical=True,
     ).sign(ca_key, hashes.SHA256(), default_backend())
     # Write our certificate out to disk.
     with open("{}/client-configs/{}.crt".format(result_dir, client_name), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))    
 
-    #
-    #
-    # GENERATE CONFIG FILES
-    #
-    #
-    #
+
+def create_client_config(result_dir, name):
     with open("{}/ca.crt".format(result_dir)) as f:
         ca_cert_srt = f.read()
-    with open("{}/client-configs/{}.crt".format(result_dir, client_name)) as f:
+    with open("{}/client-configs/{}.crt".format(result_dir, name)) as f:
         client_cert_str = f.read()
-    with open("{}/client-configs/{}.key".format(result_dir, client_name)) as f:
+    with open("{}/client-configs/{}.key".format(result_dir, name)) as f:
         client_key_str = f.read()
     with open("{}/ta.key".format(result_dir)) as f:
         ta_key_str = f.read()
@@ -214,7 +251,7 @@ def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
         lstrip_blocks=True)
     template = j2_env.get_template('client.ovpn')
     output = template.render(output=result_dir, **context)
-    with open("{}/client-configs/{}.ovpn".format(result_dir, client_name), 'w') as f:
+    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
         f.write(output)
 
 
@@ -405,7 +442,7 @@ def create_status_file(result_dir):
     except:
         pass
 
-def create_client_configs(result_dir):
+def create_client_configs_dir(result_dir):
     try:
         os.makedirs("{}/client-configs".format(result_dir))
     except OSError as e:
@@ -428,9 +465,10 @@ if (len(sys.argv) > 1):
     create_dh_params(result_dir)
     generate_psk(result_dir)
     generate_config(result_dir)
-    create_client_cert(result_dir, ca_key, ca_cert, issuer, "client42")
     create_status_file(result_dir)
-    create_client_configs(result_dir)
+    create_client_configs_dir(result_dir)
+    create_client_cert(result_dir, ca_key, ca_cert, issuer, "client42")
+    create_client_config(result_dir, "client42")
 else:
     print("ERROR: please specify the result directory.")
     exit(1)
