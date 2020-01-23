@@ -396,6 +396,7 @@ def get_tun_network():
     rand_ip = str(random.choice(subnets))
     return rand_ip.split('/')[0]
 
+SERVERIP = get_tun_network()
 
 def generate_config(result_dir):
     dns_info = get_dns_info()
@@ -418,7 +419,7 @@ def generate_config(result_dir):
         'ext_ip': ext_ip,
         'pub_ip': pub_ip,
         'internal_networks': internal_networks,
-        'serverip': get_tun_network(),
+        'serverip': SERVERIP,
         'servernetmask': '255.255.255.0',
         'serverslashmask': '24',
     }
@@ -431,6 +432,19 @@ def generate_config(result_dir):
     with open('{}/server.conf'.format(result_dir), 'w') as f:
         f.write(output)
 
+
+def generate_init_script(result_dir):
+    context = {
+        'ovpn_network': SERVERIP,
+    }
+    j2_env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        trim_blocks=True,
+        lstrip_blocks=True)
+    template = j2_env.get_template('init.sh')
+    output = template.render(output=result_dir, **context)
+    with open('{}/init.sh'.format(result_dir), 'w') as f:
+        f.write(output)    
 
 def create_status_file(result_dir):
     status_path = Path('{}/openvpn-server1-status.log'.format(result_dir))
@@ -469,6 +483,7 @@ if (len(sys.argv) > 1):
     create_client_configs_dir(result_dir)
     create_client_cert(result_dir, ca_key, ca_cert, issuer, "client42")
     create_client_config(result_dir, "client42")
+    generate_init_script(result_dir)
 else:
     print("ERROR: please specify the result directory.")
     exit(1)

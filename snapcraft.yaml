@@ -16,13 +16,28 @@ passthrough:
 
 apps:
   easy-openvpn-server:
-    command: bin/run.sh
     daemon: simple
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
+    command-chain:
+      - bin/run.sh
     plugs:
       - network
       - network-bind
       - network-control
       - firewall-control
+    environment:
+      LD_PRELOAD: "$SNAP/wraplib.so"
+  openvpn:
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
+    command-chain:
+      - bin/run.sh
+    plugs:
+      - network
+      - network-bind
+      - network-control
+      - firewall-control
+    environment:
+      LD_PRELOAD: "$SNAP/wraplib.so"
   setup:
     command: bin/setup.py $SNAP_USER_DATA
     plugs:
@@ -33,15 +48,7 @@ apps:
     plugs:
       - network
       - network-observe
-  openvpn:
-    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
-    plugs:
-      - network
-      - network-bind
-      - network-control
-      - firewall-control
-    environment:
-      LD_PRELOAD: "$SNAP/wraplib.so"
+
 
 parts:
   openvpn:
