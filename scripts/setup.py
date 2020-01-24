@@ -19,6 +19,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import (serialization, hashes)
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.x509 import load_pem_x509_certificate
 from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.x509.oid import NameOID
 from jinja2 import Environment, FileSystemLoader
@@ -76,7 +78,14 @@ def create_ca(result_dir):
     return (ca_key, ca_cert, issuer)
 
 
-def create_cert(ca_key, issuer, result_dir):
+def create_server_cert(result_dir):
+    with open("{}/ca.crt".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_cert = x509.load_pem_x509_certificate(data, default_backend())
+    with open("{}/ca.key".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_key = load_pem_private_key(data, None, default_backend())
+
     # Generate our key
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -104,12 +113,10 @@ def create_cert(ca_key, issuer, result_dir):
         x509.NameAttribute(NameOID.COMMON_NAME, u"mysite.com"),
     ])
 
-
-
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(
-        issuer
+        ca_cert.issuer
     ).public_key(
         key.public_key()
     ).serial_number(
@@ -148,11 +155,15 @@ def create_cert(ca_key, issuer, result_dir):
     with open("{}/server.crt".format(result_dir), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
 
-    # x509.KeyUsage()
 
-    # x509.KeyUsage(digital_signature=True, key_encipherment=True)
+def create_client_cert(result_dir, client_name):
+    with open("{}/ca.crt".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_cert = x509.load_pem_x509_certificate(data, default_backend())
+    with open("{}/ca.key".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_key = load_pem_private_key(data, None, default_backend())
 
-def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
     # Generate our key
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -183,7 +194,7 @@ def create_client_cert(result_dir, ca_key, ca_cert, issuer, client_name):
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(
-        issuer
+        ca_cert.issuer
     ).public_key(
         key.public_key()
     ).serial_number(
@@ -264,15 +275,15 @@ def create_client_config(result_dir, name):
 
 
 def create_dh_params(result_dir):
-    print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
     if not os.path.isfile("{}/dh4096.pem".format(result_dir)):
+        print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
         parameters = dh.generate_parameters(generator=2, key_size=2048,
                                             backend=default_backend())
         # Write the dh parameters to disk.
         with open("{}/dh4096.pem".format(result_dir), "wb") as f:
             f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
 
-def generate_psk(result_dir):
+def create_psk(result_dir):
     if not os.path.isfile("{}/ta.key".format(result_dir)):
         subprocess.check_call(["openvpn", "--genkey", "--secret", "{}/ta.key".format(result_dir)])
 
@@ -318,7 +329,7 @@ def get_extip_and_networks():
     internal_networks = []
     pub_ip_obj = IPv4Address(pub_ip)
     ext_ip_obj = IPv4Address(ext_ip)
-    for network in get_networks(remove_tunnels=True):
+    for network in get_used_networks(remove_tunnels=True):
         if pub_ip_obj in network or ext_ip_obj in network:
             continue
         internal_networks.append("{} {}".format(
@@ -349,7 +360,7 @@ def get_dns_info():
     return info
 
 
-def get_networks(remove_tunnels=False):
+def get_used_networks(remove_tunnels=False):
     '''Returns a list with Ip Networks that are in use
     '''
     networks = []
@@ -366,17 +377,20 @@ def get_networks(remove_tunnels=False):
     return networks
 
 
-def get_tun_network():
-    '''Return a random network for tun interface
+def pick_tun_network(netmask_bits):
+    '''Returns a random network that is available to use for the tun interface.
+    The randomness decreases the chance that the network will collide with
+    existing remote networks and VPN's. This way, users can safely connect
+    to multiple easy-openvpn-instances at the same time.
     '''
-    a_class = ip_network('10.0.0.0/255.0.0.0')
-    nets = get_networks()
-    available_networks = [a_class]
-    for network in nets:
+    used_networks = get_used_networks()
+    available_networks = [ip_network('10.0.0.0/255.0.0.0')]
+    # Remove all used networks from the available networks.
+    for used_net in used_networks:
         updated = []
-        for a_net in available_networks:
+        for available_net in available_networks:
             try:
-                net_iter = a_net.address_exclude(network)
+                net_iter = available_net.address_exclude(used_net)
                 for n in net_iter:
                     updated.append(n)
             except ValueError:
@@ -385,27 +399,40 @@ def get_tun_network():
             available_networks = updated
     if len(available_networks) == 0:
         print('ERROR: Could not find available server network')
-
+    # Divide the available networks in subnets.
     subnets = []
-    for a_net in available_networks:
+    for available_net in available_networks:
         try:
-            subs = a_net.subnets(new_prefix=24)
+            subs = available_net.subnets(new_prefix=netmask_bits)
             subnets.extend(subs)
         except ValueError:
             pass
+    # Pick a random available subnet.
+    return random.choice(subnets)
 
-    rand_ip = str(random.choice(subnets))
-    return rand_ip.split('/')[0]
 
-SERVERIP = get_tun_network()
+def get_tun_network(result_dir):
+    '''Returns the network to use for the tunnel. Generates a new
+    network if one was not saved yet.
+    '''    
+    try:
+        with open("{}/tun-network".format(result_dir), 'r') as f:
+            tun_network = ip_network((f.read()))
+    except FileNotFoundError:
+        tun_network = pick_tun_network(24)
+        with open("{}/tun-network".format(result_dir), 'w+') as f:
+            f.write(str(tun_network))
+    return tun_network
 
-def generate_config(result_dir):
+
+def create_server_config(result_dir):
     dns_info = get_dns_info()
     # clients = conf['clients'].split()
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
     pub_ip = eipndict['public-ip']
     internal_networks = eipndict['internal-networks']
+    tunnel_network = get_tun_network(result_dir)
     context = {
         'config_dir': '.',
         'data_dir': '.',
@@ -420,9 +447,8 @@ def generate_config(result_dir):
         'ext_ip': ext_ip,
         'pub_ip': pub_ip,
         'internal_networks': internal_networks,
-        'serverip': SERVERIP,
-        'servernetmask': '255.255.255.0',
-        'serverslashmask': '24',
+        'tunnel_network': str(tunnel_network.network_address),
+        'tunnel_netmask': str(tunnel_network.netmask),
     }
     j2_env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
@@ -436,7 +462,7 @@ def generate_config(result_dir):
 
 def generate_init_script(result_dir):
     context = {
-        'ovpn_network': "{}/24".format(SERVERIP),
+        'ovpn_network': str(get_tun_network(result_dir)),
     }
     j2_env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
@@ -473,18 +499,56 @@ def create_client_configs_dir(result_dir):
 
 
 
-if (len(sys.argv) > 1):
-    result_dir = sys.argv[1]
+if (len(sys.argv) < 1):
+    print("ERROR: please specify a command.")
+    exit(1)
+
+command = sys.argv[1]
+result_dir = os.environ['SNAP_USER_DATA']
+
+if command == "setup":
     ca_key, ca_cert, issuer = create_ca(result_dir)
-    create_cert(ca_key, issuer, result_dir)
     create_dh_params(result_dir)
-    generate_psk(result_dir)
-    generate_config(result_dir)
+    create_psk(result_dir)
+    create_server_cert(result_dir)
+    create_server_config(result_dir)
     create_status_file(result_dir)
     create_client_configs_dir(result_dir)
-    create_client_cert(result_dir, ca_key, ca_cert, issuer, "client42")
-    create_client_config(result_dir, "client42")
     generate_init_script(result_dir)
+    create_client_cert(result_dir, "default")
+    create_client_config(result_dir, "default")
+
+elif command == "add-client":
+    if (len(sys.argv) < 2):
+        print("ERROR: please specify the client name.")
+        exit(1)
+    client_name = sys.argv[2]
+    create_client_cert(result_dir, client_name)
+    create_client_config(result_dir, client_name)
+
+elif command == "remove-client":
+    if (len(sys.argv) < 2):
+        print("ERROR: please specify the client name.")
+        exit(1)
+    client_name = sys.argv[2]
+    try:
+        os.rename(
+            "{}/client-configs/{}.ovpn".format(result_dir, client_name),
+            "{}/client-configs/{}.ovpn.removed".format(result_dir, client_name))
+    except FileNotFoundError:
+        print("WARNING: could not find client config file.")
+    try:
+        os.rename(
+            "{}/client-configs/{}.crt".format(result_dir, client_name),
+            "{}/client-configs/{}.crt.removed".format(result_dir, client_name))
+    except FileNotFoundError:
+        print("WARNING: could not find client certificate.")
+    try:
+        os.rename(
+            "{}/client-configs/{}.key".format(result_dir, client_name),
+            "{}/client-configs/{}.key.removed".format(result_dir, client_name))
+    except FileNotFoundError:
+        print("WARNING: could not find client private key.")
+
 else:
-    print("ERROR: please specify the result directory.")
-    exit(1)
+    print("command {} not recognised".format(command))

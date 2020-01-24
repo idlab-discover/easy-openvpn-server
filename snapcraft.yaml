@@ -39,10 +39,20 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   setup:
-    command: bin/setup.py $SNAP_USER_DATA
+    command: bin/setup.py setup
     plugs:
       - network
       - network-observe
+  add-client:
+    command: bin/setup.py add-client
+    plugs:
+      - network
+      - network-observe    
+  remove-client:
+    command: bin/setup.py remove-client
+    plugs:
+      - network
+      - network-observe        
   facter:
     command: usr/bin/facter
     plugs:
