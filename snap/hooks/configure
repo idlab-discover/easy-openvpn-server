@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+# Restart server which will re-trigger the setup script.
+snapctl restart easy-openvpn-server.server

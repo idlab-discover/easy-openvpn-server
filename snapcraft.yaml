@@ -15,7 +15,7 @@ passthrough:
     snap_daemon: shared
 
 apps:
-  easy-openvpn-server:
+  server:
     daemon: simple
     command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
     command-chain:
@@ -59,6 +59,12 @@ apps:
       - network
       - network-observe
 
+
+hooks:
+  configure:
+    plugs:
+      - network
+      - network-observe
 
 parts:
   openvpn:

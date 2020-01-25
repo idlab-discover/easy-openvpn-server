@@ -26,7 +26,7 @@ sudo easy-openvpn-server.remove-client alice
 # Show status
 
 # Show logs
-sudo journalctl -u snap.easy-openvpn-server.easy-openvpn-server
+sudo journalctl -u snap.easy-openvpn-server.server
 ```
 
 ## Authors

@@ -26,34 +26,46 @@ from cryptography.x509.oid import NameOID
 from jinja2 import Environment, FileSystemLoader
 
 
-def create_ca(result_dir):
-    # Generate our key
-    ca_key = rsa.generate_private_key(
+#
+#
+# Certificate and key management
+#
+#
+
+def create_RSA_keypair(path):
+    '''Creates and returns an RSA keypair and writes the private key to disk.
+    '''
+    # Generate the key
+    keypair = rsa.generate_private_key(
         public_exponent=65537,
-        key_size=2048,
+        key_size=4096,
         backend=default_backend()
     )
-
-    # Write our key to disk for safe keeping
-    with open("{}/ca.key".format(result_dir), "wb") as f:
-        f.write(ca_key.private_bytes(
+    # Write the key to disk for safe keeping
+    with open(path, "wb") as f:
+        f.write(keypair.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
             encryption_algorithm=serialization.NoEncryption(),
-            # TODO: figure out if we can make this a bit more secure
-            # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
         ))
-    # Make sure other users can't read out private key
-    os.chmod("{}/ca.key".format(result_dir), stat.S_IRUSR | stat.S_IWUSR )
+    # Make sure other users can't read the private key
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    return keypair
 
-    # Various details about who we are. For a self-signed certificate the
-    # subject and issuer are always the same.
+
+def create_ca(result_dir):
+    # If the key exists, we assume there is a valid keypair and certificate.
+    if os.path.isfile("{}/ca.key".format(result_dir)):
+        print("INFO: CA key already exists, not creating a new one..")
+        return
+    ca_key = create_RSA_keypair("{}/ca.key".format(result_dir))
+
     subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"My Company"),
-        x509.NameAttribute(NameOID.COMMON_NAME, u"Easy VPN server CA"),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, u"BE"),
+        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"East Flanders"),
+        x509.NameAttribute(NameOID.LOCALITY_NAME, u"Ghent"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Easy OpenVPN Server"),
+        x509.NameAttribute(NameOID.COMMON_NAME, u"easy-openvpn-server CA"),
     ])
     ca_cert = x509.CertificateBuilder().subject_name(
         subject
@@ -66,19 +78,24 @@ def create_ca(result_dir):
     ).not_valid_before(
         datetime.datetime.utcnow()
     ).not_valid_after(
-        # Our certificate will be valid for about 100 years
+        # This certificate will be valid for about 100 years
         datetime.datetime.utcnow() + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=True, path_length=None), critical=True,
-    # Sign our certificate with our private key
+    # Sign the certificate with the CA private key (self-signed)
     ).sign(ca_key, hashes.SHA256(), default_backend())
-    # Write our certificate out to disk.
+    # Write the certificate out to disk.
     with open("{}/ca.crt".format(result_dir), "wb") as f:
         f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-    return (ca_key, ca_cert, issuer)
 
 
 def create_server_cert(result_dir):
+    # If the key exists, we assume there is a valid keypair and certificate.
+    if os.path.isfile("{}/server.key".format(result_dir)):
+        print("INFO: Server key already exists, not creating a new one..")
+        return
+    key = create_RSA_keypair("{}/server.key".format(result_dir))
+
     with open("{}/ca.crt".format(result_dir), "rb") as f:
         data = f.read()
         ca_cert = x509.load_pem_x509_certificate(data, default_backend())
@@ -86,33 +103,13 @@ def create_server_cert(result_dir):
         data = f.read()
         ca_key = load_pem_private_key(data, None, default_backend())
 
-    # Generate our key
-    key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
-    )
-
-    # Write our key to disk for safe keeping
-    with open("{}/server.key".format(result_dir), "wb") as f:
-        f.write(key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-            # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
-        ))
-    # Make sure other users can't read out private key
-    os.chmod("{}/server.key".format(result_dir), stat.S_IRUSR | stat.S_IWUSR )
-
-    # Various details about who we are.
     subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"My Company"),
-        x509.NameAttribute(NameOID.COMMON_NAME, u"mysite.com"),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, u"BE"),
+        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"East Flanders"),
+        x509.NameAttribute(NameOID.LOCALITY_NAME, u"Ghent"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Easy OpenVPN Server"),
+        x509.NameAttribute(NameOID.COMMON_NAME, u"easy-openvpn-server Server"),
     ])
-
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(
@@ -124,7 +121,7 @@ def create_server_cert(result_dir):
     ).not_valid_before(
         datetime.datetime.utcnow()
     ).not_valid_after(
-        # Our certificate will be valid for about 100 years
+        # This certificate will be valid for about 100 years
         datetime.datetime.utcnow() + datetime.timedelta(days=36500)
     ).add_extension(
         # Make it clear this is a server key.
@@ -149,14 +146,20 @@ def create_server_cert(result_dir):
     ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
         critical=False,
-    # Sign our certificate with given ca key
+    # Sign the certificate with ca key
     ).sign(ca_key, hashes.SHA256(), default_backend())
-    # Write our certificate out to disk.
+    # Write the certificate out to disk.
     with open("{}/server.crt".format(result_dir), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
 
 
 def create_client_cert(result_dir, client_name):
+    # If the key exists, we assume there is a valid keypair and certificate.
+    if os.path.isfile("{}/client-configs/{}.key".format(result_dir, client_name)):
+        print("INFO: Client key already exists, not creating a new one..")
+        return
+    key = create_RSA_keypair("{}/client-configs/{}.key".format(result_dir, client_name))
+
     with open("{}/ca.crt".format(result_dir), "rb") as f:
         data = f.read()
         ca_cert = x509.load_pem_x509_certificate(data, default_backend())
@@ -164,33 +167,13 @@ def create_client_cert(result_dir, client_name):
         data = f.read()
         ca_key = load_pem_private_key(data, None, default_backend())
 
-    # Generate our key
-    key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
-    )
-
-    # Write our key to disk for safe keeping
-    with open("{}/client-configs/{}.key".format(result_dir, client_name), "wb") as f:
-        f.write(key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-            # encryption_algorithm=serialization.BestAvailableEncryption(b"passphrase"),
-        ))
-    # Make sure other users can't read out private key
-    os.chmod("{}/client-configs/{}.key".format(result_dir, client_name), stat.S_IRUSR | stat.S_IWUSR )
-
-    # Various details about who we are.
     subject = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
-        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"My Company"),
+        x509.NameAttribute(NameOID.COUNTRY_NAME, u"BE"),
+        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"East Flanders"),
+        x509.NameAttribute(NameOID.LOCALITY_NAME, u"Ghent"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Easy OpenVPN Server"),
         x509.NameAttribute(NameOID.COMMON_NAME, client_name),
     ])
-
     cert = x509.CertificateBuilder().subject_name(
         subject
     ).issuer_name(
@@ -202,7 +185,7 @@ def create_client_cert(result_dir, client_name):
     ).not_valid_before(
         datetime.datetime.utcnow()
     ).not_valid_after(
-        # Our certificate will be valid for about 100 years
+        # This certificate will be valid for about 100 years
         datetime.datetime.utcnow() + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=False, path_length=None),
@@ -229,64 +212,38 @@ def create_client_cert(result_dir, client_name):
     ).add_extension(
         x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
         critical=True,
+    # Sign the certificate with ca key
     ).sign(ca_key, hashes.SHA256(), default_backend())
-    # Write our certificate out to disk.
+    # Write the certificate out to disk.
     with open("{}/client-configs/{}.crt".format(result_dir, client_name), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))    
 
 
-def create_client_config(result_dir, name):
-    with open("{}/ca.crt".format(result_dir)) as f:
-        ca_cert_srt = f.read()
-    with open("{}/client-configs/{}.crt".format(result_dir, name)) as f:
-        client_cert_str = f.read()
-    with open("{}/client-configs/{}.key".format(result_dir, name)) as f:
-        client_key_str = f.read()
-    with open("{}/ta.key".format(result_dir)) as f:
-        ta_key_str = f.read()
-
-    eipndict = get_extip_and_networks()
-    pub_ip = eipndict['public-ip']
-    context = {
-        'protocol': "tcp",
-        'address': pub_ip,
-        'port': "443",
-        'ca': ca_cert_srt,
-        'cert': client_cert_str,
-        'key': client_key_str,
-        'tls_auth': ta_key_str,
-    }
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('client.ovpn')
-    output = template.render(output=result_dir, **context)
-    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
-        f.write(output)
-
-
-
-
-
-
-
-
-
-
 def create_dh_params(result_dir):
-    if not os.path.isfile("{}/dh4096.pem".format(result_dir)):
-        print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
-        parameters = dh.generate_parameters(generator=2, key_size=2048,
-                                            backend=default_backend())
-        # Write the dh parameters to disk.
-        with open("{}/dh4096.pem".format(result_dir), "wb") as f:
-            f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
+    # Generating these parameters is expensive so don't overwrite existing params.
+    if os.path.isfile("{}/dh4096.pem".format(result_dir)):
+        return
+    print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
+    parameters = dh.generate_parameters(generator=2, key_size=4096,
+                                        backend=default_backend())
+    # Write the dh parameters to disk.
+    with open("{}/dh4096.pem".format(result_dir), "wb") as f:
+        f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
+
 
 def create_psk(result_dir):
-    if not os.path.isfile("{}/ta.key".format(result_dir)):
-        subprocess.check_call(["openvpn", "--genkey", "--secret", "{}/ta.key".format(result_dir)])
+    # Don't overwrite existing PSK because that will break existing client
+    # config files.
+    if os.path.isfile("{}/ta.key".format(result_dir)):
+        return
+    subprocess.check_call(["openvpn", "--genkey", "--secret", "{}/ta.key".format(result_dir)])
 
+
+#
+#
+#  Utility functions to gather information
+#
+#
 
 
 def facter(argument=None):
@@ -411,6 +368,13 @@ def pick_tun_network(netmask_bits):
     return random.choice(subnets)
 
 
+#
+#
+# Creation of config files
+#
+#
+
+
 def get_tun_network(result_dir):
     '''Returns the network to use for the tunnel. Generates a new
     network if one was not saved yet.
@@ -427,7 +391,6 @@ def get_tun_network(result_dir):
 
 def create_server_config(result_dir):
     dns_info = get_dns_info()
-    # clients = conf['clients'].split()
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
     pub_ip = eipndict['public-ip']
@@ -460,7 +423,46 @@ def create_server_config(result_dir):
         f.write(output)
 
 
-def generate_init_script(result_dir):
+def create_client_configs_dir(result_dir):
+    try:
+        os.makedirs("{}/client-configs".format(result_dir))
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
+
+
+def create_client_config(result_dir, name):
+    with open("{}/ca.crt".format(result_dir)) as f:
+        ca_cert_srt = f.read()
+    with open("{}/client-configs/{}.crt".format(result_dir, name)) as f:
+        client_cert_str = f.read()
+    with open("{}/client-configs/{}.key".format(result_dir, name)) as f:
+        client_key_str = f.read()
+    with open("{}/ta.key".format(result_dir)) as f:
+        ta_key_str = f.read()
+
+    eipndict = get_extip_and_networks()
+    pub_ip = eipndict['public-ip']
+    context = {
+        'protocol': "tcp",
+        'address': pub_ip,
+        'port': "443",
+        'ca': ca_cert_srt,
+        'cert': client_cert_str,
+        'key': client_key_str,
+        'tls_auth': ta_key_str,
+    }
+    j2_env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        trim_blocks=True,
+        lstrip_blocks=True)
+    template = j2_env.get_template('client.ovpn')
+    output = template.render(output=result_dir, **context)
+    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
+        f.write(output)
+
+
+def create_init_script(result_dir):
     context = {
         'ovpn_network': str(get_tun_network(result_dir)),
     }
@@ -473,30 +475,27 @@ def generate_init_script(result_dir):
     with open('{}/init.sh'.format(result_dir), 'w') as f:
         f.write(output)    
 
+
 def create_status_file(result_dir):
+    # This function currently doesn't work
+    # https://forum.snapcraft.io/t/system-usernames/13386/4?u=galgalesh
     status_path = Path('{}/openvpn-server1-status.log'.format(result_dir))
-    status_path.touch()
-    uid = pwd.getpwnam("snap_daemon").pw_uid
-    gid = grp.getgrnam("snap_daemon").gr_gid
     try:
+        status_path.touch()
+        # os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
+        os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
+        uid = pwd.getpwnam("snap_daemon").pw_uid
+        gid = grp.getgrnam("snap_daemon").gr_gid
         os.chown(status_path, uid, gid)
-    except:
+    except PermissionError:
         pass
 
-def create_client_configs_dir(result_dir):
-    try:
-        os.makedirs("{}/client-configs".format(result_dir))
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
 
-
-
-
-
-
-
-
+#
+#
+# Main program
+#
+#
 
 
 if (len(sys.argv) < 1):
@@ -507,14 +506,14 @@ command = sys.argv[1]
 result_dir = os.environ['SNAP_USER_DATA']
 
 if command == "setup":
-    ca_key, ca_cert, issuer = create_ca(result_dir)
+    create_ca(result_dir)
     create_dh_params(result_dir)
     create_psk(result_dir)
     create_server_cert(result_dir)
     create_server_config(result_dir)
     create_status_file(result_dir)
     create_client_configs_dir(result_dir)
-    generate_init_script(result_dir)
+    create_init_script(result_dir)
     create_client_cert(result_dir, "default")
     create_client_config(result_dir, "default")
 
