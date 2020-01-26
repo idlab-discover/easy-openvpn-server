@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import pwd
 import random
+import socket
 import stat
 import subprocess
 import sys
@@ -272,22 +273,25 @@ def get_extip_and_networks():
                     ext_ip = address
     if not ext_ip:
         ext_ip = net_info['networking']['ip']
-    # TODO: do we need similar logic?
-    # # If public-address is different from private-address, we're probably in a
-    # # juju-supported cloud that we can trust to give us the right address that
-    # # clients need to use to connect to us. If not, just use ext_ip.
-    # if unit_get('private-address') != unit_get('public-address'):
-    #     pub_ip = unit_get('public-address')
-    # else:
-    pub_ip = ext_ip
+    public_address = ext_ip
+    # If user manually set `public-address` setting, use that one.
+    if get_config("public-address"):
+        public_address = get_config("public-address")
+
     print("External IP according to get_extip logic: {}".format(ext_ip))
-    print("Public IP according to get_extip logic: {}".format(pub_ip))
+    print("Public address according to get_extip logic: {}".format(public_address))
+
+    try:
+        public_ip = socket.gethostbyname(public_address)
+    except socket.error:
+        print("WARNING: Failed to resolve the public-address '{}'".format(public_address))
+        public_ip = ext_ip
 
     internal_networks = []
-    pub_ip_obj = IPv4Address(pub_ip)
+    public_ip_obj = IPv4Address(public_ip)
     ext_ip_obj = IPv4Address(ext_ip)
     for network in get_used_networks(remove_tunnels=True):
-        if pub_ip_obj in network or ext_ip_obj in network:
+        if public_ip_obj in network or ext_ip_obj in network:
             continue
         internal_networks.append("{} {}".format(
             network.network_address,
@@ -296,9 +300,10 @@ def get_extip_and_networks():
     return {
         # IP of local interface that clients connect to.
         "external-ip": ext_ip,
-        # IP that remote clients will use to connect to. This is identical to
-        # external-ip except when Juju provides us with
-        "public-ip": pub_ip,
+        # Address that remote clients will use to connect to this machine.
+        # This is identical to external-ip except when a user manually
+        # overrides it.
+        "public-address": public_address,
         "internal-networks": internal_networks,
     }
 
@@ -370,6 +375,23 @@ def pick_tun_network(netmask_bits):
 
 #
 #
+# Snapcraft utility functions
+#
+#
+
+
+def get_config(key):
+    output = subprocess.check_output(['snapctl', 'get', key], universal_newlines=True)
+    output = output.rstrip()
+    return output
+
+
+def set_config(key, value):
+    subprocess.check_call(['snapctl', 'set', '{}={}'.format(key, str(value))])
+
+
+#
+#
 # Creation of config files
 #
 #
@@ -378,14 +400,16 @@ def pick_tun_network(netmask_bits):
 def get_tun_network(result_dir):
     '''Returns the network to use for the tunnel. Generates a new
     network if one was not saved yet.
-    '''    
-    try:
-        with open("{}/tun-network".format(result_dir), 'r') as f:
-            tun_network = ip_network((f.read()))
-    except FileNotFoundError:
-        tun_network = pick_tun_network(24)
-        with open("{}/tun-network".format(result_dir), 'w+') as f:
-            f.write(str(tun_network))
+    '''
+    tun_network = get_config("tun-network")
+    if tun_network:
+        try:
+            tun_network = ip_network(tun_network)
+            return tun_network
+        except ValueError as e:
+            print("ERROR: tun-network setting is invalid: {}".format(e))
+    tun_network = pick_tun_network(24)
+    set_config("tun-network", tun_network)
     return tun_network
 
 
@@ -393,7 +417,6 @@ def create_server_config(result_dir):
     dns_info = get_dns_info()
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
-    pub_ip = eipndict['public-ip']
     internal_networks = eipndict['internal-networks']
     tunnel_network = get_tun_network(result_dir)
     context = {
@@ -408,7 +431,6 @@ def create_server_config(result_dir):
         'dns_server': dns_info.get('nameserver', "8.8.8.8"),
         'dns_search_domains': dns_info.get('search', []),
         'ext_ip': ext_ip,
-        'pub_ip': pub_ip,
         'internal_networks': internal_networks,
         'tunnel_network': str(tunnel_network.network_address),
         'tunnel_netmask': str(tunnel_network.netmask),
@@ -433,7 +455,7 @@ def create_client_configs_dir(result_dir):
 
 def create_client_config(result_dir, name):
     with open("{}/ca.crt".format(result_dir)) as f:
-        ca_cert_srt = f.read()
+        ca_cert_str = f.read()
     with open("{}/client-configs/{}.crt".format(result_dir, name)) as f:
         client_cert_str = f.read()
     with open("{}/client-configs/{}.key".format(result_dir, name)) as f:
@@ -442,12 +464,12 @@ def create_client_config(result_dir, name):
         ta_key_str = f.read()
 
     eipndict = get_extip_and_networks()
-    pub_ip = eipndict['public-ip']
+    pub_ip = eipndict["public-address"]
     context = {
         'protocol': "tcp",
         'address': pub_ip,
         'port': "443",
-        'ca': ca_cert_srt,
+        'ca': ca_cert_str,
         'cert': client_cert_str,
         'key': client_key_str,
         'tls_auth': ta_key_str,
