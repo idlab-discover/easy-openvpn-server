@@ -39,6 +39,8 @@ apps:
       - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
+  status:
+    command: bin/status.sh
   openvpn:
     command: usr/sbin/openvpn --config $SNAP_USER_DATA/tcp-server.conf --cd $SNAP_USER_DATA
     command-chain:

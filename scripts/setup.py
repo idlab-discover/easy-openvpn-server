@@ -392,6 +392,11 @@ def set_config(key, value):
     subprocess.check_call(['snapctl', 'set', '{}={}'.format(key, str(value))])
 
 
+def restart_daemons():
+    subprocess.check_call(['snapctl', 'restart', "easy-openvpn-server.tcp-server"])
+    subprocess.check_call(['snapctl', 'restart', "easy-openvpn-server.udp-server"])
+
+
 #
 #
 # Creation of config files
@@ -560,6 +565,7 @@ def main():
         create_server_config(result_dir, status_dir)
         create_status_files(status_dir)
         create_client_configs_dir(result_dir)
+        restart_daemons()
         create_client_cert(result_dir, "default")
         for client in get_clients(result_dir):
             create_client_config(result_dir, client)
