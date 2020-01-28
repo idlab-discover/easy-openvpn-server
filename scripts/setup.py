@@ -298,6 +298,7 @@ def get_extip_and_networks():
             network.network_address,
             network.netmask))
     print("Routes to push according to logic: {}".format(internal_networks))
+    set_config("public-address", public_address)
     return {
         # IP of local interface that clients connect to.
         "external-ip": ext_ip,
@@ -417,7 +418,7 @@ def get_tun_networks(result_dir):
     return (tun_networks[0], tun_networks[1])
 
 
-def create_server_config(result_dir):
+def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
@@ -426,6 +427,7 @@ def create_server_config(result_dir):
     tcp_context = {
         'config_dir': '.',
         'data_dir': '.',
+        'status_file_path': "{}/tcp-server-status.log".format(status_dir),
         'servername': "easy-openvpn-server-1",
         'protocol': "tcp-server",
         'port': "443",
@@ -449,6 +451,7 @@ def create_server_config(result_dir):
         f.write(output)
 
     udp_context = tcp_context
+    udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
     udp_context['port'] = "53"
     udp_context['protocol'] = "udp"
     udp_context['tunnel_network'] = str(udp_tunnel_network.network_address)
@@ -482,13 +485,12 @@ def create_client_config(result_dir, name):
     with open("{}/ta.key".format(result_dir)) as f:
         ta_key_str = f.read()
 
-    eipndict = get_extip_and_networks()
-    pub_ip = eipndict["public-address"]
+    public_address = get_config("public-address")
     context = {
         'tcp_port': "443",
         'udp_port': "53",
         'protocol': "tcp",
-        'address': pub_ip,
+        'address': public_address,
         'ca': ca_cert_str,
         'cert': client_cert_str,
         'key': client_key_str,
@@ -504,19 +506,35 @@ def create_client_config(result_dir, name):
         f.write(output)
 
 
-def create_status_file(result_dir):
+def get_clients(result_dir):
+    '''Returns a list of all clients which have a certificate
+    '''
+    import glob
+    clients = glob.glob(r'{}/client-configs/*.crt'.format(result_dir))
+    clients = [os.path.splitext(os.path.basename(c))[0] for c in clients]
+    return clients
+
+
+def create_status_files(status_dir):
     # This function currently doesn't work
     # https://forum.snapcraft.io/t/system-usernames/13386/4?u=galgalesh
-    status_path = Path('{}/openvpn-server1-status.log'.format(result_dir))
+    tcp_status_path = Path('{}/tcp-server-status.log'.format(status_dir))
+    udp_status_path = Path('{}/udp-server-status.log'.format(status_dir))
+    tcp_status_path.touch()
+    udp_status_path.touch()
+    # os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
     try:
-        status_path.touch()
-        # os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
-        os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
-        uid = pwd.getpwnam("snap_daemon").pw_uid
-        gid = grp.getgrnam("snap_daemon").gr_gid
-        os.chown(status_path, uid, gid)
-    except PermissionError:
+        os.chmod(tcp_status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
+        os.chmod(udp_status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
+    except:
         pass
+    subprocess.check_call(['chown', 'snap_daemon', tcp_status_path])
+    subprocess.check_call(['chown', 'snap_daemon', udp_status_path])
+    # uid = pwd.getpwnam("snap_daemon").pw_uid
+    # gid = grp.getgrnam("snap_daemon").gr_gid
+    # os.chown(tcp_status_path, uid, 0)
+    # os.chown(udp_status_path, uid, 0)
+
 
 
 #
@@ -525,56 +543,61 @@ def create_status_file(result_dir):
 #
 #
 
-
-if (len(sys.argv) < 1):
-    print("ERROR: please specify a command.")
-    exit(1)
-
-command = sys.argv[1]
-result_dir = os.environ['SNAP_USER_DATA']
-
-if command == "setup":
-    create_ca(result_dir)
-    create_dh_params(result_dir)
-    create_psk(result_dir)
-    create_server_cert(result_dir)
-    create_server_config(result_dir)
-    create_status_file(result_dir)
-    create_client_configs_dir(result_dir)
-    create_client_cert(result_dir, "default")
-    create_client_config(result_dir, "default")
-
-elif command == "add-client":
-    if (len(sys.argv) < 2):
-        print("ERROR: please specify the client name.")
+def main():
+    if (len(sys.argv) < 1):
+        print("ERROR: please specify a command.")
         exit(1)
-    client_name = sys.argv[2]
-    create_client_cert(result_dir, client_name)
-    create_client_config(result_dir, client_name)
 
-elif command == "remove-client":
-    if (len(sys.argv) < 2):
-        print("ERROR: please specify the client name.")
-        exit(1)
-    client_name = sys.argv[2]
-    try:
-        os.rename(
-            "{}/client-configs/{}.ovpn".format(result_dir, client_name),
-            "{}/client-configs/{}.ovpn.removed".format(result_dir, client_name))
-    except FileNotFoundError:
-        print("WARNING: could not find client config file.")
-    try:
-        os.rename(
-            "{}/client-configs/{}.crt".format(result_dir, client_name),
-            "{}/client-configs/{}.crt.removed".format(result_dir, client_name))
-    except FileNotFoundError:
-        print("WARNING: could not find client certificate.")
-    try:
-        os.rename(
-            "{}/client-configs/{}.key".format(result_dir, client_name),
-            "{}/client-configs/{}.key.removed".format(result_dir, client_name))
-    except FileNotFoundError:
-        print("WARNING: could not find client private key.")
+    command = sys.argv[1]
+    result_dir = os.environ['SNAP_USER_DATA']
+    status_dir = os.environ['SNAP_DATA']
 
-else:
-    print("command {} not recognised".format(command))
+    if command == "setup":
+        create_ca(result_dir)
+        create_dh_params(result_dir)
+        create_psk(result_dir)
+        create_server_cert(result_dir)
+        create_server_config(result_dir, status_dir)
+        create_status_files(status_dir)
+        create_client_configs_dir(result_dir)
+        create_client_cert(result_dir, "default")
+        for client in get_clients(result_dir):
+            create_client_config(result_dir, client)
+
+    elif command == "add-client":
+        if (len(sys.argv) < 2):
+            print("ERROR: please specify the client name.")
+            exit(1)
+        client_name = sys.argv[2]
+        create_client_cert(result_dir, client_name)
+        create_client_config(result_dir, client_name)
+
+    elif command == "remove-client":
+        if (len(sys.argv) < 2):
+            print("ERROR: please specify the client name.")
+            exit(1)
+        client_name = sys.argv[2]
+        try:
+            os.rename(
+                "{}/client-configs/{}.ovpn".format(result_dir, client_name),
+                "{}/client-configs/{}.ovpn.removed".format(result_dir, client_name))
+        except FileNotFoundError:
+            print("WARNING: could not find client config file.")
+        try:
+            os.rename(
+                "{}/client-configs/{}.crt".format(result_dir, client_name),
+                "{}/client-configs/{}.crt.removed".format(result_dir, client_name))
+        except FileNotFoundError:
+            print("WARNING: could not find client certificate.")
+        try:
+            os.rename(
+                "{}/client-configs/{}.key".format(result_dir, client_name),
+                "{}/client-configs/{}.key.removed".format(result_dir, client_name))
+        except FileNotFoundError:
+            print("WARNING: could not find client private key.")
+
+    else:
+        print("command {} not recognised".format(command))
+
+if __name__ == "__main__":
+    main()
