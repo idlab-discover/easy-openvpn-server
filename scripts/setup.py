@@ -568,7 +568,7 @@ def main():
         if (len(sys.argv) < 2):
             print("ERROR: please specify the client name.")
             exit(1)
-        client_name = sys.argv[2]
+        client_name = sys.argv[2].lower()
         create_client_cert(result_dir, client_name)
         create_client_config(result_dir, client_name)
 
@@ -576,7 +576,7 @@ def main():
         if (len(sys.argv) < 2):
             print("ERROR: please specify the client name.")
             exit(1)
-        client_name = sys.argv[2]
+        client_name = sys.argv[2].lower()
         try:
             os.rename(
                 "{}/client-configs/{}.ovpn".format(result_dir, client_name),
