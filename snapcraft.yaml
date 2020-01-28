@@ -67,6 +67,8 @@ apps:
     plugs:
       - network
       - network-observe        
+  show-client-config:
+    command: bin/setup.py show-client-config
   facter:
     command: usr/bin/facter
     plugs:

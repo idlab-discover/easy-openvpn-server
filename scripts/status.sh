@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+  echo "Error: please run as root!"
+  exit 1
+fi
+
 if [[ "$1" == "tcp" ]]; then
     cat "$SNAP_DATA/tcp-server-status.log"
 elif [[ "$1" == "udp" ]]; then

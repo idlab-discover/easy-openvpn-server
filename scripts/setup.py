@@ -5,6 +5,7 @@ import errno
 import grp
 from ipaddress import IPv4Address, ip_network
 import json
+import logging
 import os
 from pathlib import Path
 import pwd
@@ -57,7 +58,7 @@ def create_RSA_keypair(path):
 def create_ca(result_dir):
     # If the key exists, we assume there is a valid keypair and certificate.
     if os.path.isfile("{}/ca.key".format(result_dir)):
-        print("INFO: CA key already exists, not creating a new one..")
+        logging.info("CA key already exists, not creating a new one..")
         return
     ca_key = create_RSA_keypair("{}/ca.key".format(result_dir))
 
@@ -93,7 +94,7 @@ def create_ca(result_dir):
 def create_server_cert(result_dir):
     # If the key exists, we assume there is a valid keypair and certificate.
     if os.path.isfile("{}/server.key".format(result_dir)):
-        print("INFO: Server key already exists, not creating a new one..")
+        logging.info("Server key already exists, not creating a new one..")
         return
     key = create_RSA_keypair("{}/server.key".format(result_dir))
 
@@ -158,7 +159,7 @@ def create_server_cert(result_dir):
 def create_client_cert(result_dir, client_name):
     # If the key exists, we assume there is a valid keypair and certificate.
     if os.path.isfile("{}/client-configs/{}.key".format(result_dir, client_name)):
-        print("INFO: Client key already exists, not creating a new one..")
+        logging.info("Client key already exists, not creating a new one..")
         return
     key = create_RSA_keypair("{}/client-configs/{}.key".format(result_dir, client_name))
 
@@ -225,7 +226,7 @@ def create_dh_params(result_dir):
     # Generating these parameters is expensive so don't overwrite existing params.
     if os.path.isfile("{}/dh4096.pem".format(result_dir)):
         return
-    print("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
+    logging.info("Generating Diffie-Hellman parameters. This might take up to a few minutes..")
     parameters = dh.generate_parameters(generator=2, key_size=4096,
                                         backend=default_backend())
     # Write the dh parameters to disk.
@@ -279,13 +280,13 @@ def get_extip_and_networks():
     if get_config("public-address"):
         public_address = get_config("public-address")
 
-    print("External IP according to get_extip logic: {}".format(ext_ip))
-    print("Public address according to get_extip logic: {}".format(public_address))
+    logging.info("External IP according to get_extip logic: {}".format(ext_ip))
+    logging.info("Public address according to get_extip logic: {}".format(public_address))
 
     try:
         public_ip = socket.gethostbyname(public_address)
     except socket.error:
-        print("WARNING: Failed to resolve the public-address '{}'".format(public_address))
+        logging.warning("Failed to resolve the public-address '{}'".format(public_address))
         public_ip = ext_ip
 
     internal_networks = []
@@ -297,7 +298,7 @@ def get_extip_and_networks():
         internal_networks.append("{} {}".format(
             network.network_address,
             network.netmask))
-    print("Routes to push according to logic: {}".format(internal_networks))
+    logging.info("Routes to push according to logic: {}".format(internal_networks))
     set_config("public-address", public_address)
     return {
         # IP of local interface that clients connect to.
@@ -362,7 +363,7 @@ def pick_tun_networks(netmask_bits):
         if updated:
             available_networks = updated
     if len(available_networks) == 0:
-        print('ERROR: Could not find available server network')
+        logging.error('Could not find available server network')
     # Divide the available networks in subnets.
     subnets = []
     for available_net in available_networks:
@@ -416,7 +417,7 @@ def get_tun_networks(result_dir):
             udp_tun_network = ip_network(udp_tun_network)
             return (tcp_tun_network, udp_tun_network)
         except ValueError as e:
-            print("ERROR: tun-network setting is invalid: {}".format(e))
+            logging.error("tun-network setting is invalid: {}".format(e))
     tun_networks = pick_tun_networks(24)
     set_config("internal.tcp.tun-network", str(tun_networks[0]))
     set_config("internal.udp.tun-network", str(tun_networks[1]))
@@ -511,6 +512,18 @@ def create_client_config(result_dir, name):
         f.write(output)
 
 
+def show_client_config(result_dir, name):
+    try:
+        with open("{}/client-configs/{}.ovpn".format(result_dir, name)) as f:
+            client_config_str = f.read()
+            print(client_config_str)
+    except FileNotFoundError:
+        logging.error(
+            "Config for client {} does not appear to exist.\n"
+            "You can create it by running\n"
+            "\tsudo easy-openvpn-server.add-client {}".format(name, name))
+
+
 def get_clients(result_dir):
     '''Returns a list of all clients which have a certificate
     '''
@@ -527,11 +540,11 @@ def create_status_files(status_dir):
     udp_status_path = Path('{}/udp-server-status.log'.format(status_dir))
     tcp_status_path.touch()
     udp_status_path.touch()
-    # os.chmod(status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH)
     try:
         os.chmod(tcp_status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
         os.chmod(udp_status_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
-    except:
+    except PermissionError:
+        # This call is supposed to fail when the files are already chown'd.
         pass
     subprocess.check_call(['chown', 'snap_daemon', tcp_status_path])
     subprocess.check_call(['chown', 'snap_daemon', udp_status_path])
@@ -549,8 +562,13 @@ def create_status_files(status_dir):
 #
 
 def main():
-    if (len(sys.argv) < 1):
-        print("ERROR: please specify a command.")
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    if os.geteuid() != 0:
+        logging.error("Please run this as root!")
+        exit(1)
+
+    if (len(sys.argv) < 2):
+        logging.error("Please specify a command.")
         exit(1)
 
     command = sys.argv[1]
@@ -571,16 +589,27 @@ def main():
             create_client_config(result_dir, client)
 
     elif command == "add-client":
-        if (len(sys.argv) < 2):
-            print("ERROR: please specify the client name.")
+        if (len(sys.argv) < 3):
+            logging.error("Please specify the client name.")
             exit(1)
         client_name = sys.argv[2].lower()
         create_client_cert(result_dir, client_name)
         create_client_config(result_dir, client_name)
+        logging.info(
+            "Added {name}. You can copy its config using\n"
+            "\tsudo easy-openvpn-server.show-client-config {name} > {name}.ovpn".format(
+                name=client_name))
+
+    elif command == "show-client-config":
+        if (len(sys.argv) < 3):
+            logging.error("please specify the client name.")
+            exit(1)
+        client_name = sys.argv[2].lower()
+        show_client_config(result_dir, client_name)
 
     elif command == "remove-client":
-        if (len(sys.argv) < 2):
-            print("ERROR: please specify the client name.")
+        if (len(sys.argv) < 3):
+            logging.error("Please specify the client name.")
             exit(1)
         client_name = sys.argv[2].lower()
         try:
@@ -588,22 +617,22 @@ def main():
                 "{}/client-configs/{}.ovpn".format(result_dir, client_name),
                 "{}/client-configs/{}.ovpn.removed".format(result_dir, client_name))
         except FileNotFoundError:
-            print("WARNING: could not find client config file.")
+            logging.warning("Could not find client config file.")
         try:
             os.rename(
                 "{}/client-configs/{}.crt".format(result_dir, client_name),
                 "{}/client-configs/{}.crt.removed".format(result_dir, client_name))
         except FileNotFoundError:
-            print("WARNING: could not find client certificate.")
+            logging.warning("Could not find client certificate.")
         try:
             os.rename(
                 "{}/client-configs/{}.key".format(result_dir, client_name),
                 "{}/client-configs/{}.key.removed".format(result_dir, client_name))
         except FileNotFoundError:
-            print("WARNING: could not find client private key.")
+            logging.warning("Could not find client private key.")
 
     else:
-        print("command {} not recognised".format(command))
+        logging.error("Command {} not recognised".format(command))
 
 if __name__ == "__main__":
     main()

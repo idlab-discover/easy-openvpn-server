@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [ "$EUID" -ne 0 ]; then
+  echo "Error: please run as root!"
+  exit 1
+fi
+
 for var in "$@"
 do
     if [[ "$found" == true ]]; then
