@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import datetime
+from distutils.util import strtobool
 import errno
 import grp
 from ipaddress import IPv4Address, ip_network
@@ -234,6 +235,16 @@ def create_dh_params(result_dir):
         f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
 
 
+def get_dh_params_path():
+    dh_params_type = get_config("dh-params-type")
+    if dh_params_type == "generated":
+        create_dh_params(result_dir)
+        return "./dh4096.pem"
+    else:
+        set_config("dh-params-type", "rfc3526")
+        return "{}/templates/RFC3526-dh4096.pem".format(os.environ['SNAP'])
+
+
 def create_psk(result_dir):
     # Don't overwrite existing PSK because that will break existing client
     # config files.
@@ -376,6 +387,13 @@ def pick_tun_networks(netmask_bits):
     return random.sample(subnets, 2)
 
 
+def get_push_default_gateway():
+    push_default_gateway = get_config("push-default-gateway")
+    if push_default_gateway:
+        return strtobool(push_default_gateway.lower())
+    else:
+        set_config("push-default-gateway", "True")
+        return True
 #
 #
 # Snapcraft utility functions
@@ -433,13 +451,14 @@ def create_server_config(result_dir, status_dir):
     tcp_context = {
         'config_dir': '.',
         'data_dir': '.',
+        'dh': get_dh_params_path(),
         'status_file_path': "{}/tcp-server-status.log".format(status_dir),
         'servername': "easy-openvpn-server-1",
         'protocol': "tcp-server",
         'port': "443",
         'duplicate_cn': True,
         'push_dns': True,
-        'push_default_gateway': True,
+        'push_default_gateway': get_push_default_gateway(),
         'dns_server': dns_info.get('nameserver', "8.8.8.8"),
         'dns_search_domains': dns_info.get('search', []),
         'ext_ip': ext_ip,
@@ -577,7 +596,6 @@ def main():
 
     if command == "setup":
         create_ca(result_dir)
-        create_dh_params(result_dir)
         create_psk(result_dir)
         create_server_cert(result_dir)
         create_server_config(result_dir, status_dir)
