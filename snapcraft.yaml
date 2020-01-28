@@ -61,12 +61,12 @@ apps:
     command: bin/setup.py add-client
     plugs:
       - network
-      - network-observe    
+      - network-observe
   remove-client:
     command: bin/setup.py remove-client
     plugs:
       - network
-      - network-observe        
+      - network-observe
   show-client-config:
     command: bin/setup.py show-client-config
   facter:
