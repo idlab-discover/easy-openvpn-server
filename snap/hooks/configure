@@ -1,5 +1,8 @@
 #!/bin/bash
 set -e
 
+$SNAP/snap/command-chain/snapcraft-runner $SNAP/bin/setup.py setup
+
 # Restart server which will re-trigger the setup script.
-snapctl restart easy-openvpn-server.server
+snapctl restart easy-openvpn-server.tcp-server
+snapctl restart easy-openvpn-server.udp-server

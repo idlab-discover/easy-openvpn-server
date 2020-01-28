@@ -15,9 +15,21 @@ passthrough:
     snap_daemon: shared
 
 apps:
-  server:
+  tcp-server:
     daemon: simple
-    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/tcp-server.conf --cd $SNAP_USER_DATA
+    command-chain:
+      - bin/run.sh
+    plugs:
+      - network
+      - network-bind
+      - network-control
+      - firewall-control
+    environment:
+      LD_PRELOAD: "$SNAP/wraplib.so"
+  udp-server:
+    daemon: simple
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/udp-server.conf --cd $SNAP_USER_DATA
     command-chain:
       - bin/run.sh
     plugs:
@@ -28,7 +40,7 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   openvpn:
-    command: usr/sbin/openvpn --config $SNAP_USER_DATA/server.conf --cd $SNAP_USER_DATA
+    command: usr/sbin/openvpn --config $SNAP_USER_DATA/tcp-server.conf --cd $SNAP_USER_DATA
     command-chain:
       - bin/run.sh
     plugs:

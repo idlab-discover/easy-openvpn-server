@@ -145,6 +145,7 @@ def create_server_cert(result_dir):
         x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
         critical=True,
     ).add_extension(
+        # TODO: try to remove this.
         x509.SubjectAlternativeName([x509.DNSName(u"localhost")]),
         critical=False,
     # Sign the certificate with ca key
@@ -339,7 +340,7 @@ def get_used_networks(remove_tunnels=False):
     return networks
 
 
-def pick_tun_network(netmask_bits):
+def pick_tun_networks(netmask_bits):
     '''Returns a random network that is available to use for the tun interface.
     The randomness decreases the chance that the network will collide with
     existing remote networks and VPN's. This way, users can safely connect
@@ -369,8 +370,8 @@ def pick_tun_network(netmask_bits):
             subnets.extend(subs)
         except ValueError:
             pass
-    # Pick a random available subnet.
-    return random.choice(subnets)
+    # Pick two random available subnet.
+    return random.sample(subnets, 2)
 
 
 #
@@ -397,20 +398,23 @@ def set_config(key, value):
 #
 
 
-def get_tun_network(result_dir):
+def get_tun_networks(result_dir):
     '''Returns the network to use for the tunnel. Generates a new
     network if one was not saved yet.
     '''
-    tun_network = get_config("tun-network")
-    if tun_network:
+    tcp_tun_network = get_config("internal.tcp.tun-network")
+    udp_tun_network = get_config("internal.udp.tun-network")
+    if tcp_tun_network and udp_tun_network:
         try:
-            tun_network = ip_network(tun_network)
-            return tun_network
+            tcp_tun_network = ip_network(tcp_tun_network)
+            udp_tun_network = ip_network(udp_tun_network)
+            return (tcp_tun_network, udp_tun_network)
         except ValueError as e:
             print("ERROR: tun-network setting is invalid: {}".format(e))
-    tun_network = pick_tun_network(24)
-    set_config("tun-network", tun_network)
-    return tun_network
+    tun_networks = pick_tun_networks(24)
+    set_config("internal.tcp.tun-network", str(tun_networks[0]))
+    set_config("internal.udp.tun-network", str(tun_networks[1]))
+    return (tun_networks[0], tun_networks[1])
 
 
 def create_server_config(result_dir):
@@ -418,8 +422,8 @@ def create_server_config(result_dir):
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
     internal_networks = eipndict['internal-networks']
-    tunnel_network = get_tun_network(result_dir)
-    context = {
+    (tcp_tunnel_network, udp_tunnel_network) = get_tun_networks(result_dir)
+    tcp_context = {
         'config_dir': '.',
         'data_dir': '.',
         'servername': "easy-openvpn-server-1",
@@ -432,16 +436,31 @@ def create_server_config(result_dir):
         'dns_search_domains': dns_info.get('search', []),
         'ext_ip': ext_ip,
         'internal_networks': internal_networks,
-        'tunnel_network': str(tunnel_network.network_address),
-        'tunnel_netmask': str(tunnel_network.netmask),
+        'tunnel_network': str(tcp_tunnel_network.network_address),
+        'tunnel_netmask': str(tcp_tunnel_network.netmask),
     }
     j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
         trim_blocks=True,
         lstrip_blocks=True)
     template = j2_env.get_template('server.conf')
-    output = template.render(output=result_dir, **context)
-    with open('{}/server.conf'.format(result_dir), 'w') as f:
+    output = template.render(output=result_dir, **tcp_context)
+    with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
+        f.write(output)
+
+    udp_context = tcp_context
+    udp_context['port'] = "53"
+    udp_context['protocol'] = "udp"
+    udp_context['tunnel_network'] = str(udp_tunnel_network.network_address)
+    udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
+
+    j2_env = Environment(
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
+        trim_blocks=True,
+        lstrip_blocks=True)
+    template = j2_env.get_template('server.conf')
+    output = template.render(output=result_dir, **udp_context)
+    with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
 
 
@@ -466,9 +485,10 @@ def create_client_config(result_dir, name):
     eipndict = get_extip_and_networks()
     pub_ip = eipndict["public-address"]
     context = {
+        'tcp_port': "443",
+        'udp_port': "53",
         'protocol': "tcp",
         'address': pub_ip,
-        'port': "443",
         'ca': ca_cert_str,
         'cert': client_cert_str,
         'key': client_key_str,
@@ -482,20 +502,6 @@ def create_client_config(result_dir, name):
     output = template.render(output=result_dir, **context)
     with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
         f.write(output)
-
-
-def create_init_script(result_dir):
-    context = {
-        'ovpn_network': str(get_tun_network(result_dir)),
-    }
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('init.sh')
-    output = template.render(output=result_dir, **context)
-    with open('{}/init.sh'.format(result_dir), 'w') as f:
-        f.write(output)    
 
 
 def create_status_file(result_dir):
@@ -535,7 +541,6 @@ if command == "setup":
     create_server_config(result_dir)
     create_status_file(result_dir)
     create_client_configs_dir(result_dir)
-    create_init_script(result_dir)
     create_client_cert(result_dir, "default")
     create_client_config(result_dir, "default")
 
