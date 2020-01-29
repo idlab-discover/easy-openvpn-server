@@ -295,7 +295,7 @@ def get_extip_and_networks():
     logging.info("Public address according to get_extip logic: {}".format(public_address))
 
     try:
-        public_ip = socket.gethostbyname(public_address)
+        public_ip = socket.gethostbyname(str(public_address))
     except socket.error:
         logging.warning("Failed to resolve the public-address '{}'".format(public_address))
         public_ip = ext_ip
@@ -323,14 +323,36 @@ def get_extip_and_networks():
 
 
 def get_dns_info():
-    info = {}
-    with open('/etc/resolv.conf', 'r') as resolv_file:
+    info = parse_resolvconf('/etc/resolv.conf')
+    # Often, resolf.conf will point to local resolver. If this resolver is
+    # resolvd, we can scan its file. Otherwise, don't pass a nameserver.
+    loopback_ns = False
+    for ns_address in info['nameservers']:
+        ns_address = IPv4Address(ns_address)
+        if ns_address.is_loopback:
+            loopback_ns = True
+
+    if loopback_ns:
+        info['nameservers'] = []
+        try:
+            resolved_info = parse_resolvconf('/run/systemd/resolve/resolv.conf')
+            info = resolved_info
+        except FileNotFoundError:
+            pass
+    return info
+
+
+def parse_resolvconf(resolv_path):
+    info = {
+        "nameservers": []
+    }
+    with open(resolv_path, 'r') as resolv_file:
         content = resolv_file.readlines()
     for line in content:
         words = line.split()
         if len(words) > 1:
             if words[0] == "nameserver":
-                info['nameserver'] = words[1]
+                info['nameservers'].append(words[1])
             elif words[0] == "search":
                 info['search'] = words[1:]
     return info
@@ -459,7 +481,8 @@ def create_server_config(result_dir, status_dir):
         'duplicate_cn': True,
         'push_dns': True,
         'push_default_gateway': get_push_default_gateway(),
-        'dns_server': dns_info.get('nameserver', "8.8.8.8"),
+        # Default to OpenDNS when no nameservers were found
+        'dns_server': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
         'dns_search_domains': dns_info.get('search', []),
         'ext_ip': ext_ip,
         'internal_networks': internal_networks,
