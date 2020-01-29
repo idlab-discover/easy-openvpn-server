@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+touch $SNAP_USER_DATA/internal.firewall-control-connected
+
+snapctl restart easy-openvpn-server.tcp-server
+snapctl restart easy-openvpn-server.udp-server

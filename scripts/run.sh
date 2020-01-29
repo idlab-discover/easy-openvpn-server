@@ -6,6 +6,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+if [[ ! ( -f "$SNAP_USER_DATA/internal.firewall-control-connected" && -f "$SNAP_USER_DATA/internal.network-control-connected" ) ]]; then
+    echo "Error: please connect interfaces"
+    sleep infinity
+fi
+
 for var in "$@"
 do
     if [[ "$found" == true ]]; then
