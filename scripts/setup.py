@@ -472,7 +472,7 @@ def get_ports():
         set_config("tcp-server.port", tcp_port)
     udp_port = get_config("udp-server.port")
     if not udp_port:
-        udp_port = "443"
+        udp_port = "53"
         set_config("udp-server.port", udp_port)
     return (tcp_port, udp_port)
 

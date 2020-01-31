@@ -2,7 +2,16 @@
 
 [![Snap Status](https://build.snapcraft.io/badge/IBCNServices/easy-openvpn-server.svg)](https://build.snapcraft.io/user/IBCNServices/easy-openvpn-server) [![Minecraft Installer](https://snapcraft.io/easy-openvpn-server/badge.svg)](https://snapcraft.io/easy-openvpn-server)
 
-This snap contains a plug-and-play OpenVPN server. Get started in three steps:
+This snap contains a plug-and-play OpenVPN server that "Just Works" and has secure defaults.
+
+* By default, all the traffic of clients is sent over the VPN. Use this to securely connect to the internet, bust through firewalls and change your country.
+* You can also use it to connect clients securely to a remote network and configure it so that only the traffic to the remote network will go over the VPN.
+
+It supports both udp and tcp connections. Clients will try the faster udp connection first. If that is blocked, they will fall back to a tcp connection that mimicks https traffic.
+
+It automatically generates `.ovpn` client config files that work on Linux, Mac and Windows, Android and iOS.
+
+## Getting started
 
 1. Install the snap on the server.
 
@@ -27,8 +36,6 @@ This snap contains a plug-and-play OpenVPN server. Get started in three steps:
    ```
 
 3. Import the `.ovpn` config file into the VPN application of your device.
-
-The config file is set so the client will first try to connect using the fast udp protocol. If that fails, it will fall back to the harder-to-block tcp protocol which resembles HTTPS traffic.
 
 By default, the VPN will advertise itself as the default gateway, meaning that **all the traffic of your device will be sent over the VPN**. This is useful to secure your internet access or to pretend you are in a different country.
 
@@ -59,12 +66,17 @@ sudo journalctl -u snap.easy-openvpn-server.udp-server
 
 ## Changing hostname and port
 
+The snap will do its best to figure out what the public address of the server is. However, when that fails, you can manually set the public address.
+
 ```bash
-# Change the ports of the udp and tcp daemon
+sudo snap set easy-openvpn-server public-address=example.com
+```
+
+By default the server runs on port 443/tcp (https) and 53/udp (dns). If those ports are already used, you can change which ports the server runs on.
+
+```bash
 sudo snap set easy-openvpn-server udp-server.port=1194
 sudo snap set easy-openvpn-server tcp-server.port=80
-# Update the address that clients use to connect to the server
-sudo snap set easy-openvpn-server public-address=example.com
 ```
 
 ## FAQ
@@ -74,8 +86,6 @@ sudo snap set easy-openvpn-server public-address=example.com
 OpenVPN is a lot better at punching through firewalls.
 
 Wireguard is a great tool for connecting networks over an untrusted *but cooperative* network. However, if the network wants to block Wireguard traffic, it can very easily do so because Wireguard does not try to hide itself. Because OpenVPN uses SSL, it's much harder to distinguish its traffic from regular HTTPS traffic.
-
-
 
 ## Authors
 
