@@ -52,25 +52,13 @@ apps:
       - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
-  setup:
-    command: bin/setup.py setup
+  easy-openvpn-server:
+    command: bin/setup.py
     plugs:
-      - network
-  add-client:
-    command: bin/setup.py add-client
-    plugs:
-      - network
-  remove-client:
-    command: bin/setup.py remove-client
-    plugs:
-      - network
-  show-client-config:
-    command: bin/setup.py show-client-config
-  facter:
-    command: usr/bin/facter
-    plugs:
-      - network
-
+      - network    
+    environment:
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
 
 hooks:
   configure:

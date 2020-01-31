@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 
+import click
 import cryptography
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -235,7 +236,7 @@ def create_dh_params(result_dir):
         f.write(parameters.parameter_bytes(serialization.Encoding.PEM, serialization.ParameterFormat.PKCS3))
 
 
-def get_dh_params_path():
+def get_dh_params_path(result_dir):
     dh_params_type = get_config("dh-params-type")
     if dh_params_type == "generated":
         create_dh_params(result_dir)
@@ -464,25 +465,37 @@ def get_tun_networks(result_dir):
     return (tun_networks[0], tun_networks[1])
 
 
+def get_ports():
+    tcp_port = get_config("tcp-server.port")
+    if not tcp_port:
+        tcp_port = "443"
+        set_config("tcp-server.port", tcp_port)
+    udp_port = get_config("udp-server.port")
+    if not udp_port:
+        udp_port = "443"
+        set_config("udp-server.port", udp_port)
+    return (tcp_port, udp_port)
+
 def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
     eipndict = get_extip_and_networks()
     ext_ip = eipndict['external-ip']
     internal_networks = eipndict['internal-networks']
     (tcp_tunnel_network, udp_tunnel_network) = get_tun_networks(result_dir)
+    (tcp_port, udp_port) = get_ports()
     tcp_context = {
         'config_dir': '.',
         'data_dir': '.',
-        'dh': get_dh_params_path(),
+        'dh': get_dh_params_path(result_dir),
         'status_file_path': "{}/tcp-server-status.log".format(status_dir),
         'servername': "easy-openvpn-server-1",
         'protocol': "tcp-server",
-        'port': "443",
+        'port': tcp_port,
         'duplicate_cn': True,
         'push_dns': True,
         'push_default_gateway': get_push_default_gateway(),
         # Default to OpenDNS when no nameservers were found
-        'dns_server': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
+        'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
         'dns_search_domains': dns_info.get('search', []),
         'ext_ip': ext_ip,
         'internal_networks': internal_networks,
@@ -500,7 +513,7 @@ def create_server_config(result_dir, status_dir):
 
     udp_context = tcp_context
     udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
-    udp_context['port'] = "53"
+    udp_context['port'] = udp_port
     udp_context['protocol'] = "udp"
     udp_context['tunnel_network'] = str(udp_tunnel_network.network_address)
     udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
@@ -563,7 +576,7 @@ def show_client_config(result_dir, name):
         logging.error(
             "Config for client {} does not appear to exist.\n"
             "You can create it by running\n"
-            "\tsudo easy-openvpn-server.add-client {}".format(name, name))
+            "\tsudo easy-openvpn-server add-client {}".format(name, name))
 
 
 def get_clients(result_dir):
@@ -596,84 +609,91 @@ def create_status_files(status_dir):
     # os.chown(udp_status_path, uid, 0)
 
 
-
 #
 #
 # Main program
 #
 #
 
-def main():
+
+@click.group()
+@click.pass_context
+def cli(ctx):
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     if os.geteuid() != 0:
         logging.error("Please run this as root!")
         exit(1)
+    ctx.obj = {}
+    ctx.obj["result_dir"] = os.environ['SNAP_USER_DATA']
+    ctx.obj["status_dir"] = os.environ['SNAP_DATA']
 
-    if (len(sys.argv) < 2):
-        logging.error("Please specify a command.")
-        exit(1)
 
-    command = sys.argv[1]
-    result_dir = os.environ['SNAP_USER_DATA']
-    status_dir = os.environ['SNAP_DATA']
+@cli.command()
+@click.pass_context
+def setup(ctx):
+    """Initialises OpenVPN config files, keys and CA.
+    """
+    create_ca(ctx.obj["result_dir"])
+    create_psk(ctx.obj["result_dir"])
+    create_server_cert(ctx.obj["result_dir"])
+    create_server_config(ctx.obj["result_dir"], ctx.obj["status_dir"])
+    create_status_files(ctx.obj["status_dir"])
+    create_client_configs_dir(ctx.obj["result_dir"])
+    restart_daemons()
+    create_client_cert(ctx.obj["result_dir"], "default")
+    for client in get_clients(ctx.obj["result_dir"]):
+        create_client_config(ctx.obj["result_dir"], client)
 
-    if command == "setup":
-        create_ca(result_dir)
-        create_psk(result_dir)
-        create_server_cert(result_dir)
-        create_server_config(result_dir, status_dir)
-        create_status_files(status_dir)
-        create_client_configs_dir(result_dir)
-        restart_daemons()
-        create_client_cert(result_dir, "default")
-        for client in get_clients(result_dir):
-            create_client_config(result_dir, client)
 
-    elif command == "add-client":
-        if (len(sys.argv) < 3):
-            logging.error("Please specify the client name.")
-            exit(1)
-        client_name = sys.argv[2].lower()
-        create_client_cert(result_dir, client_name)
-        create_client_config(result_dir, client_name)
-        logging.info(
-            "Added {name}. You can copy its config using\n"
-            "\tsudo easy-openvpn-server.show-client-config {name} > {name}.ovpn".format(
-                name=client_name))
+@cli.command()
+@click.pass_context
+@click.argument('client_name')
+def add_client(ctx, client_name):
+    """Creates a new client config with given name.
+    """
+    create_client_cert(ctx.obj["result_dir"], client_name)
+    create_client_config(ctx.obj["result_dir"], client_name)
+    logging.info(
+        "Added {name}. You can copy its config using\n"
+        "\tsudo easy-openvpn-server show-client {name} > {name}.ovpn".format(
+            name=client_name))
 
-    elif command == "show-client-config":
-        if (len(sys.argv) < 3):
-            logging.error("please specify the client name.")
-            exit(1)
-        client_name = sys.argv[2].lower()
-        show_client_config(result_dir, client_name)
 
-    elif command == "remove-client":
-        if (len(sys.argv) < 3):
-            logging.error("Please specify the client name.")
-            exit(1)
-        client_name = sys.argv[2].lower()
-        try:
-            os.rename(
-                "{}/client-configs/{}.ovpn".format(result_dir, client_name),
-                "{}/client-configs/{}.ovpn.removed".format(result_dir, client_name))
-        except FileNotFoundError:
-            logging.warning("Could not find client config file.")
-        try:
-            os.rename(
-                "{}/client-configs/{}.crt".format(result_dir, client_name),
-                "{}/client-configs/{}.crt.removed".format(result_dir, client_name))
-        except FileNotFoundError:
-            logging.warning("Could not find client certificate.")
-        try:
-            os.rename(
-                "{}/client-configs/{}.key".format(result_dir, client_name),
-                "{}/client-configs/{}.key.removed".format(result_dir, client_name))
-        except FileNotFoundError:
-            logging.warning("Could not find client private key.")
+@cli.command()
+@click.pass_context
+@click.argument('client_name')
+def show_client(ctx, client_name):
+    """Outputs the client config file in `.ovpn` format to stdout.
+    """
+    show_client_config(ctx.obj["result_dir"], client_name)
 
-    else:
-        logging.error("Command {} not recognised".format(command))
+
+@cli.command()
+@click.pass_context
+@click.argument('client_name')
+def remove_client(ctx, client_name):
+    """Remove the client config.
+    """
+    client_name = client_name.lower()
+    try:
+        os.rename(
+            "{}/client-configs/{}.ovpn".format(ctx.obj["result_dir"], client_name),
+            "{}/client-configs/{}.ovpn.removed".format(ctx.obj["result_dir"], client_name))
+    except FileNotFoundError:
+        logging.warning("Could not find client config file.")
+    try:
+        os.rename(
+            "{}/client-configs/{}.crt".format(ctx.obj["result_dir"], client_name),
+            "{}/client-configs/{}.crt.removed".format(ctx.obj["result_dir"], client_name))
+    except FileNotFoundError:
+        logging.warning("Could not find client certificate.")
+    try:
+        os.rename(
+            "{}/client-configs/{}.key".format(ctx.obj["result_dir"], client_name),
+            "{}/client-configs/{}.key.removed".format(ctx.obj["result_dir"], client_name))
+    except FileNotFoundError:
+        logging.warning("Could not find client private key.")
+
 
 if __name__ == "__main__":
-    main()
+    cli() #pylint: disable=E1123,E1120

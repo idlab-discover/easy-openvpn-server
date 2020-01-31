@@ -1,2 +1,3 @@
 cryptography
 jinja2
+click
