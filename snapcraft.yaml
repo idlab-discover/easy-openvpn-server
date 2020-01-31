@@ -100,6 +100,7 @@ parts:
       - requirements.txt 
     stage-packages:
       - facter
+      - libffi-dev
   templates:
     plugin: dump
     source: templates
