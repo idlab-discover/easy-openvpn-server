@@ -502,10 +502,12 @@ def create_server_config(result_dir, status_dir):
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
     }
+    import jinja2
     j2_env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
         trim_blocks=True,
-        lstrip_blocks=True)
+        lstrip_blocks=True,
+        undefined=jinja2.StrictUndefined)
     template = j2_env.get_template('server.conf')
     output = template.render(output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
