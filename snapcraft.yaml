@@ -87,7 +87,6 @@ parts:
     requirements:
       - requirements.txt 
     stage-packages:
-      - facter
       # Dependencies for building `cryptography` on non-amd64 systems.
       - libffi-dev
       - libssl-dev

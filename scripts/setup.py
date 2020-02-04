@@ -4,7 +4,7 @@ import datetime
 from distutils.util import strtobool
 import errno
 import grp
-from ipaddress import IPv4Address, ip_network
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 import json
 import logging
 import os
@@ -261,67 +261,54 @@ def create_psk(result_dir):
 #
 
 
-def facter(argument=None):
-    ''' return output of `facter` as a dict
+def get_default_ip():
+    '''Get the IP used by the interface that connects to
+    the default gateway.
     '''
-    output = subprocess.check_output(["facter", '-j', argument],
+    output = subprocess.check_output(["ip", "-o", "route", "get", "1.1.1.1"],
                                      universal_newlines=True)
-    return json.loads(output)
+    return output.split(" ")[6]
 
-def get_extip_and_networks():
-    '''returns public ip. If no ip of server is public, it returns ip from
-    `facter`
+
+def get_public_addresses():
+    '''returns public addresses. If no address of server is public, and none is
+    set in the config, it returns the ip used by the interface that connects to
+    the default gateway.
     '''
-    net_info = facter('networking')
-    ext_ip = None
-    internal_networks = []
-    for iface, content in net_info['networking']['interfaces'].items():
-        if not any(bl_iface in iface for bl_iface in ['lo', 'tun']):
-            for binding in content.get('bindings', []):
-                address = IPv4Address(binding['address'])
-                #
-                # GET PUBLIC IP
-                # Can't use is_global in 14.04 because of following bug:
-                # https://bugs.python.org/issue21386
-                if not address.is_private:
-                    ext_ip = address
-    if not ext_ip:
-        ext_ip = net_info['networking']['ip']
-    public_address = ext_ip
-    # If user manually set `public-address` setting, use that one.
+    public_addresses = []
+    output = subprocess.check_output(
+        ["ip", "-o", "address", "show", "scope", "global", "primary"], universal_newlines=True)
+    for line in output.rstrip().split("\n"):
+        line = line.split()
+        address = ip_address(line[3].split('/')[0])
+        if address.is_global:
+            public_addresses.append(address)
+    # Prefer ipv4 addresses, since more places are ipv4-only than ipv6-only
+    public_addresses.sort(key=lambda x: x.version)
+    # If user manually set `public-address` setting, prefer that one.
     if get_config("public-address"):
-        public_address = get_config("public-address")
+        public_addresses.insert(0, get_config("public-address"))
+    # Fallback to default ip when no public are found
+    if len(public_addresses) == 0:
+        public_addresses.append(IPv4Address(get_default_ip()))
+    logging.info("Public addresses according to get_public_addresses: {}".format(public_addresses))
+    return [str(a) for a in public_addresses]
 
-    logging.info("External IP according to get_extip logic: {}".format(ext_ip))
-    logging.info("Public address according to get_extip logic: {}".format(public_address))
 
-    try:
-        public_ip = socket.gethostbyname(str(public_address))
-    except socket.error:
-        logging.warning("Failed to resolve the public-address '{}'".format(public_address))
-        public_ip = ext_ip
-
-    internal_networks = []
-    public_ip_obj = IPv4Address(public_ip)
-    ext_ip_obj = IPv4Address(ext_ip)
-    for network in get_used_networks(remove_tunnels=True):
-        if public_ip_obj in network or ext_ip_obj in network:
-            continue
-        internal_networks.append("{} {}".format(
-            network.network_address,
-            network.netmask))
-    logging.info("Routes to push according to logic: {}".format(internal_networks))
-    set_config("public-address", public_address)
-    return {
-        # IP of local interface that clients connect to.
-        "external-ip": ext_ip,
-        # Address that remote clients will use to connect to this machine.
-        # This is identical to external-ip except when a user manually
-        # overrides it.
-        "public-address": public_address,
-        "internal-networks": internal_networks,
-    }
-
+# def get_internal_networks(public_ips):
+#     internal_networks = []
+#     for network in get_known_networks(remove_tunnels=True):
+#         known = False
+#         for ip in public_ips:
+#             if ip in network:
+#                 known = True
+#                 break
+#         if not known:
+#             internal_networks.append("{} {}".format(
+#                 network.network_address,
+#                 network.netmask))
+#     logging.info("Routes to push according to logic: {}".format(internal_networks))
+#     return internal_networks
 
 def get_dns_info():
     info = parse_resolvconf('/etc/resolv.conf')
@@ -359,8 +346,8 @@ def parse_resolvconf(resolv_path):
     return info
 
 
-def get_used_networks(remove_tunnels=False):
-    '''Returns a list with Ip Networks that are in use
+def get_known_networks(remove_tunnels=False):
+    '''Returns a list with IPv4 networks that this host has routes for.
     '''
     networks = []
     output = subprocess.check_output(['ip', 'route', 'show'], universal_newlines=True)
@@ -382,10 +369,10 @@ def pick_tun_networks(netmask_bits):
     existing remote networks and VPN's. This way, users can safely connect
     to multiple easy-openvpn-instances at the same time.
     '''
-    used_networks = get_used_networks()
+    known_network = get_known_networks()
     available_networks = [ip_network('10.0.0.0/255.0.0.0')]
     # Remove all used networks from the available networks.
-    for used_net in used_networks:
+    for used_net in known_network:
         updated = []
         for available_net in available_networks:
             try:
@@ -472,15 +459,12 @@ def get_ports():
         set_config("tcp-server.port", tcp_port)
     udp_port = get_config("udp-server.port")
     if not udp_port:
-        udp_port = "53"
+        udp_port = "1194"
         set_config("udp-server.port", udp_port)
     return (tcp_port, udp_port)
 
 def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
-    eipndict = get_extip_and_networks()
-    ext_ip = eipndict['external-ip']
-    internal_networks = eipndict['internal-networks']
     (tcp_tunnel_network, udp_tunnel_network) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
     tcp_context = {
@@ -489,7 +473,7 @@ def create_server_config(result_dir, status_dir):
         'dh': get_dh_params_path(result_dir),
         'status_file_path': "{}/tcp-server-status.log".format(status_dir),
         'servername': "easy-openvpn-server-1",
-        'protocol': "tcp-server",
+        'protocol': "tcp6-server",
         'port': tcp_port,
         'duplicate_cn': True,
         'push_dns': True,
@@ -497,8 +481,7 @@ def create_server_config(result_dir, status_dir):
         # Default to OpenDNS when no nameservers were found
         'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
         'dns_search_domains': dns_info.get('search', []),
-        'ext_ip': ext_ip,
-        'internal_networks': internal_networks,
+        'internal_networks': get_known_networks(remove_tunnels=True),
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
     }
@@ -516,7 +499,7 @@ def create_server_config(result_dir, status_dir):
     udp_context = tcp_context
     udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
     udp_context['port'] = udp_port
-    udp_context['protocol'] = "udp"
+    udp_context['protocol'] = "udp6"
     udp_context['tunnel_network'] = str(udp_tunnel_network.network_address)
     udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
 
@@ -548,12 +531,12 @@ def create_client_config(result_dir, name):
     with open("{}/ta.key".format(result_dir)) as f:
         ta_key_str = f.read()
 
-    public_address = get_config("public-address")
+    (tcp_port, udp_port) = get_ports()
     context = {
-        'tcp_port': "443",
-        'udp_port': "53",
+        'tcp_port': tcp_port,
+        'udp_port': udp_port,
         'protocol': "tcp",
-        'address': public_address,
+        'public_addresses': get_public_addresses(),
         'ca': ca_cert_str,
         'cert': client_cert_str,
         'key': client_key_str,

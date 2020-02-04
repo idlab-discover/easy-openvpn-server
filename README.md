@@ -7,7 +7,7 @@ This snap contains a plug-and-play OpenVPN server that "Just Works" and has secu
 * By default, all the traffic of clients is sent over the VPN. Use this to securely connect to the internet, bust through firewalls and change your country.
 * You can also use it to connect clients securely to a remote network and configure it so that only the traffic to the remote network will go over the VPN.
 
-It supports both udp and tcp connections. Clients will try the faster udp connection first. If that is blocked, they will fall back to a tcp connection that mimicks https traffic.
+It supports both udp and tcp connections over IPv4 and IPv6. Clients will try the faster udp connection first. If that is blocked, they will fall back to a tcp connection that mimicks https traffic.
 
 It automatically generates `.ovpn` client config files that work on Linux, Mac and Windows, Android and iOS.
 
@@ -72,10 +72,10 @@ The snap will do its best to figure out what the public address of the server is
 sudo snap set easy-openvpn-server public-address=example.com
 ```
 
-By default the server runs on port 443/tcp (https) and 53/udp (dns). If those ports are already used, you can change which ports the server runs on.
+By default the server runs on port 443/tcp (https) and 1194/udp (OpenVPN). If those ports are already used, you can change which ports the server runs on.
 
 ```bash
-sudo snap set easy-openvpn-server udp-server.port=1194
+sudo snap set easy-openvpn-server udp-server.port=53
 sudo snap set easy-openvpn-server tcp-server.port=80
 ```
 
