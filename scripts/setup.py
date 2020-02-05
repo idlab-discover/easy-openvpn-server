@@ -4,7 +4,7 @@ import datetime
 from distutils.util import strtobool
 import errno
 import grp
-from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from ipaddress import IPv4Address, IPv6Address, IPv6Network, ip_address, ip_network
 import json
 import logging
 import os
@@ -369,10 +369,10 @@ def pick_tun_networks(netmask_bits):
     existing remote networks and VPN's. This way, users can safely connect
     to multiple easy-openvpn-instances at the same time.
     '''
-    known_network = get_known_networks()
+    known_networks = get_known_networks()
     available_networks = [ip_network('10.0.0.0/255.0.0.0')]
     # Remove all used networks from the available networks.
-    for used_net in known_network:
+    for used_net in known_networks:
         updated = []
         for available_net in available_networks:
             try:
@@ -395,6 +395,23 @@ def pick_tun_networks(netmask_bits):
             pass
     # Pick two random available subnet.
     return random.sample(subnets, 2)
+
+
+def pick_tun_networks_v6():
+    '''Returns a random ipv6 ULA network that is available to use for the
+    tun interface.
+    The randomness decreases the chance that the network will collide with
+    existing remote networks and VPN's. This way, users can safely connect
+    to multiple easy-openvpn-instances at the same time.
+    '''
+    ula = ip_network("fd00::/8")
+    tun1 = IPv6Network((
+        ula.network_address + (random.getrandbits(64 - ula.prefixlen) << 64 ),
+        64))
+    tun2 = IPv6Network((
+        ula.network_address + (random.getrandbits(64 - ula.prefixlen) << 64 ),
+        64))
+    return [tun1, tun2]
 
 
 def get_push_default_gateway():
@@ -439,17 +456,27 @@ def get_tun_networks(result_dir):
     '''
     tcp_tun_network = get_config("internal.tcp.tun-network")
     udp_tun_network = get_config("internal.udp.tun-network")
-    if tcp_tun_network and udp_tun_network:
+    tcp_tun_network_v6 = get_config("internal.tcp.tun-network-v6")
+    udp_tun_network_v6 = get_config("internal.udp.tun-network-v6")
+
+
+    if tcp_tun_network and udp_tun_network and tcp_tun_network_v6 and udp_tun_network_v6:
         try:
             tcp_tun_network = ip_network(tcp_tun_network)
             udp_tun_network = ip_network(udp_tun_network)
-            return (tcp_tun_network, udp_tun_network)
+            tcp_tun_network_v6 = ip_network(tcp_tun_network_v6)
+            udp_tun_network_v6 = ip_network(udp_tun_network_v6)
+            return (tcp_tun_network, udp_tun_network, tcp_tun_network_v6, udp_tun_network_v6)
         except ValueError as e:
             logging.error("tun-network setting is invalid: {}".format(e))
     tun_networks = pick_tun_networks(24)
     set_config("internal.tcp.tun-network", str(tun_networks[0]))
     set_config("internal.udp.tun-network", str(tun_networks[1]))
-    return (tun_networks[0], tun_networks[1])
+
+    tun_networks_v6 = pick_tun_networks_v6()
+    set_config("internal.tcp.tun-network-v6", str(tun_networks_v6[0]))
+    set_config("internal.udp.tun-network-v6", str(tun_networks_v6[1]))
+    return (tun_networks[0], tun_networks[1], tun_networks_v6[0], tun_networks_v6[1])
 
 
 def get_ports():
@@ -465,7 +492,7 @@ def get_ports():
 
 def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
-    (tcp_tunnel_network, udp_tunnel_network) = get_tun_networks(result_dir)
+    (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
     tcp_context = {
         'config_dir': '.',
@@ -484,6 +511,7 @@ def create_server_config(result_dir, status_dir):
         'internal_networks': get_known_networks(remove_tunnels=True),
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
+        'tunnel_network_v6': str(tcp_tunnel_network_v6),
     }
     import jinja2
     j2_env = Environment(
@@ -502,6 +530,7 @@ def create_server_config(result_dir, status_dir):
     udp_context['protocol'] = "udp6"
     udp_context['tunnel_network'] = str(udp_tunnel_network.network_address)
     udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
+    udp_context['tunnel_network_v6'] = str(udp_tunnel_network_v6)
 
     j2_env = Environment(
         loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
