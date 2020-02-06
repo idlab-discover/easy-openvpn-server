@@ -87,6 +87,24 @@ OpenVPN is a lot better at punching through firewalls.
 
 Wireguard is a great tool for connecting networks over an untrusted *but cooperative* network. However, if the network wants to block Wireguard traffic, it can very easily do so because Wireguard does not try to hide itself. Because OpenVPN uses SSL, it's much harder to distinguish its traffic from regular HTTPS traffic.
 
+### What can I use this VPN server for?
+
+* Encrypt your communication with the internet.
+* Change the location of your internet connection.
+* Access services which are blocked by a firewall.
+* Securely connect to a remote LAN.
+* Access the IPv6 internet from a network that only supports IPv4 (or the other way around).
+
+### Is this VPN secure?
+
+This VPN is _intended_ to be secure. It uses very secure encryption, DDoS protection and more. However, I am not a security expert, so it is definitely possible I made a mistake which causes it to be less secure.
+
+You can verify the security yourself by looking at the generated configuration files in `/root/snap/easy-openvpn-server/current/`. If you find any issues, please let me know either on GitHub or by contacting me directly.
+
+## Does it support IPv6?
+
+Yes! You can connect to the server using both IPv4 and IPv6 and the tunnel also supports both. At the moment, it uses IPv6 NAT because it provides slightly better privacy and is compatible with almost any IPv6 setup. Read the [ipv6 brain-dump](./ipv6.md) for a more thorough comparison of the different ways to support IPv6 in OpenVPN.
+
 ## Authors
 
 This software was created in the [IDLab research group](https://idlab.technology/) of [Ghent University](https://www.ugent.be/en) in Belgium.
