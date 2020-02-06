@@ -2,7 +2,7 @@
 
 [![Snap Status](https://build.snapcraft.io/badge/IBCNServices/easy-openvpn-server.svg)](https://build.snapcraft.io/user/IBCNServices/easy-openvpn-server) [![Minecraft Installer](https://snapcraft.io/easy-openvpn-server/badge.svg)](https://snapcraft.io/easy-openvpn-server)
 
-This snap contains a plug-and-play OpenVPN server that "Just Works" and has secure defaults.
+A plug-and-play OpenVPN server that "Just Works" and has secure defaults.
 
 * By default, all the traffic of clients is sent over the VPN. Use this to securely connect to the internet, bust through firewalls and change your country.
 * You can also use it to connect clients securely to a remote network and configure it so that only the traffic to the remote network will go over the VPN.

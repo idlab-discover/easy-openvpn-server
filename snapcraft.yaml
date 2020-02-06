@@ -5,63 +5,57 @@ summary: A dead-simple OpenVPN server.
 description: | 
   A plug-and-play OpenVPN server that "Just Works" and has secure defaults.
 
-  * By default, all the traffic of clients is sent over the VPN. Use this to securely connect to the internet, bust through firewalls and change your country.
-  * You can also use it to connect clients securely to a remote network and configure it so that only the traffic to the remote network will go over the VPN.
+  Install the snap, download the client config and connect!
 
-  It supports both udp and tcp connections over IPv4 and IPv6. Clients will try the faster udp connection first. If that is blocked, they will fall back to a tcp connection that mimicks https traffic.
-
-  It automatically generates `.ovpn` client config files that work on Linux, Mac and Windows, Android and iOS.
+  * Supports both IPv4 and IPv6 with secure encryption and DDoS protection.
+  * Defaults to a fast udp connection. If that is blocked, clients will fall back to a more covert tcp connection that mimicks HTTPS.
+  * Generates `.ovpn` client config files that work on Linux, Windows, Mac, Android and iOS.
 
   **Getting Started**
 
   1. Install the snap on the server.
 
-    ```bash
-    sudo snap install easy-openvpn-server
-    sudo snap connect easy-openvpn-server:network-control
-    sudo snap connect easy-openvpn-server:firewall-control
-    ```
+    `sudo snap install easy-openvpn-server`
 
-  2. Copy the client config to your personal device.
+    `sudo snap connect easy-openvpn-server:network-control`
 
-    ```bash
-    # Run this on the _server_ to create the config file.
-    sudo easy-openvpn-server.show-client default > default.ovpn
-    ```
+    `sudo snap connect easy-openvpn-server:firewall-control`
 
-    and from your device
+  2. Export the client config.
 
-    ```bash
-    # Run this on the _client_ to download the config file.
-    scp my-user@my-server:~/default.ovpn .
-    ```
+    `sudo easy-openvpn-server.show-client default > default.ovpn`
 
-  3. Import the `.ovpn` config file into the VPN application of your device.
+  3. Import the `.ovpn` config file into the VPN application of your device and connect!
 
-  By default, the VPN will advertise itself as the default gateway, meaning that **all the traffic of your device will be sent over the VPN**. This is useful to secure your internet access or to pretend you are in a different country.
+  By default, all the traffic of your device will go over the VPN.
 
-  However, if you want to use the VPN to give users remote access to an internal network, you can run `sudo snap set easy-openvpn-server push-default-gateway=False`. This will make sure the VPN is only used for accessing resources on that internal network. Traffic from your device to the internet will not use the VPN in this mode.
+  If you don't want this, run
+
+  `sudo snap set easy-openvpn-server push-default-gateway=False`.
 
   **Changing the public address**
 
   The snap will do its best to figure out what the public address of the server is. However, when that fails, you can manually set the public address.
 
-  ```bash
-  sudo snap set easy-openvpn-server public-address=example.com
-  ```
+  `sudo snap set easy-openvpn-server public-address=example.com`
 
   **Managing clients**
 
   The snap automatically creates a client profile and config with the name `default`. However, it's recommended to create a separate client profile for each user. This way, you can revoke the client profile when that user does not need access to the VPN anymore.
 
-  ```bash
-  # Add the client
-  sudo easy-openvpn-server add-client alice
-  # Get the client config
-  sudo easy-openvpn-server show-client alice > alice.ovpn
-  # Remove the client
-  sudo easy-openvpn-server remove-client alice
-  ```
+  `sudo easy-openvpn-server add-client alice`
+
+  `sudo easy-openvpn-server show-client alice > alice.ovpn`
+
+  `sudo easy-openvpn-server remove-client alice`
+
+  **Changing ports**
+
+  By default the server runs on port 443/tcp (https) and 1194/udp (OpenVPN). If those ports are already used, you can change which ports the server runs on.
+
+  `sudo snap set easy-openvpn-server udp-server.port=1234`
+
+  `sudo snap set easy-openvpn-server tcp-server.port=80`
 
 license: Apache-2.0
 
