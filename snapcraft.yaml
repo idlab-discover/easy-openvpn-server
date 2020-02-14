@@ -17,10 +17,6 @@ description: |
 
     `sudo snap install easy-openvpn-server`
 
-    `sudo snap connect easy-openvpn-server:network-control`
-
-    `sudo snap connect easy-openvpn-server:firewall-control`
-
   2. Export the client config.
 
     `sudo easy-openvpn-server.show-client default > default.ovpn`

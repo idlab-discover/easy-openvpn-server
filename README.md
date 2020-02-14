@@ -17,8 +17,6 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
 
    ```bash
    sudo snap install easy-openvpn-server
-   sudo snap connect easy-openvpn-server:network-control
-   sudo snap connect easy-openvpn-server:firewall-control
    ```
 
 2. Copy the client config to your personal device.
