@@ -23,6 +23,11 @@ do
     fi
 done
 
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Error: please generate config"
+    sleep infinity
+fi    
+
 regex="^server\s+(.*)\s+(.*)"
 while IFS= read -r line
 do
