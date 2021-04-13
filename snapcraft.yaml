@@ -139,6 +139,9 @@ parts:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - libffi-dev
       - libssl-dev
+    build-packages:
+      - build-essential
+      - python-dev
   templates:
     plugin: dump
     source: templates
