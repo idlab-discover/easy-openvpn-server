@@ -647,6 +647,7 @@ def cli(ctx):
 def setup(ctx):
     """Initialises OpenVPN config files, keys and CA.
     """
+    logging.info("Generating config for vpn daemons.")
     create_ca(ctx.obj["result_dir"])
     create_psk(ctx.obj["result_dir"])
     create_server_cert(ctx.obj["result_dir"])
@@ -680,6 +681,15 @@ def show_client(ctx, client_name):
     """Outputs the client config file in `.ovpn` format to stdout.
     """
     show_client_config(ctx.obj["result_dir"], client_name)
+
+
+@cli.command()
+@click.pass_context
+def list_clients(ctx, client_name):
+    """Outputs all clients which have config files.
+    """
+    get_clients(ctx.obj["result_dir"])
+
 
 
 @cli.command()
