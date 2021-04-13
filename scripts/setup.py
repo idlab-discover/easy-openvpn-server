@@ -685,10 +685,11 @@ def show_client(ctx, client_name):
 
 @cli.command()
 @click.pass_context
-def list_clients(ctx, client_name):
+def list_clients(ctx):
     """Outputs all clients which have config files.
     """
-    get_clients(ctx.obj["result_dir"])
+    for client in get_clients(ctx.obj["result_dir"]):
+        print(client)
 
 
 
