@@ -23,7 +23,7 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
 
    ```bash
    # Run this on the _server_ to create the config file.
-   sudo easy-openvpn-server.show-client default > default.ovpn
+   sudo easy-openvpn-server show-client default > default.ovpn
    ```
 
    and from your device

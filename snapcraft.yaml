@@ -19,7 +19,7 @@ description: |
 
   2. Export the client config.
 
-    `sudo easy-openvpn-server.show-client default > default.ovpn`
+    `sudo easy-openvpn-server show-client default > default.ovpn`
 
   3. Import the `.ovpn` config file into the VPN application of your device and connect!
 
