@@ -136,12 +136,15 @@ parts:
     requirements:
       - requirements.txt 
     stage-packages:
-      # Dependencies for building `cryptography` on non-amd64 systems.
-      - libffi-dev
-      - libssl-dev
+      # Dependencies for `cryptography` on non-amd64 systems.
+      - libffi6
+      - libssl1.1
     build-packages:
+      # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential
       - python-dev
+      - libffi-dev
+      - libssl-dev
   templates:
     plugin: dump
     source: templates
