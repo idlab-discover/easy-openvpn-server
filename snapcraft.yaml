@@ -53,6 +53,12 @@ description: |
 
   `sudo snap set easy-openvpn-server tcp-server.port=80`
 
+  **More options**
+
+  You can specify additional search domains.
+
+  `sudo snap set easy-openvpn-server additional-search-domains="test"`
+
 license: Apache-2.0
 
 base: core18

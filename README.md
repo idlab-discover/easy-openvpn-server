@@ -77,6 +77,14 @@ sudo snap set easy-openvpn-server udp-server.port=53
 sudo snap set easy-openvpn-server tcp-server.port=80
 ```
 
+## More options
+
+You can specify additional search domains.
+
+```bash
+sudo snap set easy-openvpn-server additional-search-domains="test"
+```
+
 ## FAQ
 
 ### Why OpenVPN instead of Wireguard?

@@ -494,6 +494,8 @@ def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
+    dns_search_domains = dns_info.get('search', [])
+    dns_search_domains += get_config("additional-search-domains").split()
     tcp_context = {
         'config_dir': '.',
         'data_dir': '.',
@@ -507,7 +509,7 @@ def create_server_config(result_dir, status_dir):
         'push_default_gateway': get_push_default_gateway(),
         # Default to OpenDNS when no nameservers were found
         'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
-        'dns_search_domains': dns_info.get('search', []),
+        'dns_search_domains': dns_search_domains,
         'internal_networks': get_known_networks(remove_tunnels=True),
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
