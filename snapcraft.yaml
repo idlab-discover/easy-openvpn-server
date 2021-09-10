@@ -145,6 +145,7 @@ parts:
       # Dependencies for `cryptography` on non-amd64 systems.
       - libffi6
       - libssl1.1
+      - python3-cryptography
     build-packages:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential
