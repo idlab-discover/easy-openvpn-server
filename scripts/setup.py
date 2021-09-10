@@ -224,6 +224,89 @@ def create_client_cert(result_dir, client_name):
         f.write(cert.public_bytes(serialization.Encoding.PEM))    
 
 
+def create_crl(result_dir):
+    # Note: you can read the CRL from the CLI using `openssl crl -inform PEM -text -noout -in crl.pem`
+    if os.path.isfile("{}/crl.pem".format(result_dir)):
+        logging.info("CRL already exists, not creating a new one..")
+        return
+
+    with open("{}/ca.crt".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_cert = x509.load_pem_x509_certificate(data, default_backend())
+    with open("{}/ca.key".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_key = load_pem_private_key(data, None, default_backend())
+
+    builder = x509.CertificateRevocationListBuilder()
+    builder = builder.last_update(datetime.datetime.now())
+    builder = builder.next_update(datetime.datetime.now() + datetime.timedelta(days=36500))
+    builder = builder.issuer_name(ca_cert.issuer)
+
+    cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
+
+    with open("{}/crl.pem".format(result_dir),"wb") as f:
+        f.write(cert_revocation_list.public_bytes(serialization.Encoding.PEM))
+
+
+def revoke_client_cert(result_dir, client_name):
+    if not os.path.isfile("{}/crl.pem".format(result_dir)):
+        create_crl(result_dir)
+    
+    # cert you want to revoke
+    try:
+        cert_to_revoke_data = open("{}/client-configs/{}.crt".format(result_dir, client_name),"rb").read()
+    except FileNotFoundError:
+        try:
+            cert_to_revoke_data = open("{}/client-configs/{}.crt.removed".format(result_dir, client_name),"rb").read()
+        except FileNotFoundError:
+            logging.warning("Could not find client certificate, can't revoke client.")
+            return
+
+    cert_to_revoke = x509.load_pem_x509_certificate(cert_to_revoke_data, backend=default_backend())
+
+    with open("{}/ca.crt".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_cert = x509.load_pem_x509_certificate(data, default_backend())
+    with open("{}/ca.key".format(result_dir), "rb") as f:
+        data = f.read()
+        ca_key = load_pem_private_key(data, None, default_backend())
+
+    # load crl
+    pem_crl_data = open("{}/crl.pem".format(result_dir),"rb").read()
+    crl = x509.load_pem_x509_crl(pem_crl_data, backend=default_backend())
+
+    # generate a new crl object
+    builder = x509.CertificateRevocationListBuilder()
+    builder = builder.issuer_name(crl.issuer)
+    builder = builder.last_update(crl.last_update)
+    builder = builder.next_update(datetime.datetime.now() + datetime.timedelta(days=36500))
+
+    # add crl certificates from file to the new crl object
+    for i in range(0,len(crl)):    
+        builder = builder.add_revoked_certificate(crl[i])
+
+    # see if the cert to be revoked already in the list
+    # if not, then add new revoked cert
+    revoked_sns = [r.serial_number for r in crl]
+
+    if not cert_to_revoke.serial_number in revoked_sns:
+        revoked_cert = (
+            x509.RevokedCertificateBuilder()
+            .serial_number(cert_to_revoke.serial_number)
+            .revocation_date(datetime.datetime.now())
+            .build(backend=default_backend())
+        )
+        
+        builder = builder.add_revoked_certificate(revoked_cert)
+    else:
+        logging.warning("cert already revoked")
+
+    # sign and save to new crl file
+    cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
+    with open("{}/crl.pem".format(result_dir),"wb") as f:
+        f.write(cert_revocation_list.public_bytes(serialization.Encoding.PEM))
+
+
 def create_dh_params(result_dir):
     # Generating these parameters is expensive so don't overwrite existing params.
     if os.path.isfile("{}/dh4096.pem".format(result_dir)):
@@ -265,8 +348,12 @@ def get_default_ip():
     '''Get the IP used by the interface that connects to
     the default gateway.
     '''
-    output = subprocess.check_output(["ip", "-o", "route", "get", "1.1.1.1"],
-                                     universal_newlines=True)
+    try:
+        output = subprocess.check_output(["ip", "-o", "route", "get", "1.1.1.1"],
+                                        universal_newlines=True)
+    except subprocess.CalledProcessError:
+        logging.fatal("No route available to 1.1.1.1. Please add a default gateway to this machine and try again.")
+        click.Abort()
     return output.split(" ")[6]
 
 
@@ -490,6 +577,10 @@ def get_ports():
         set_config("udp-server.port", udp_port)
     return (tcp_port, udp_port)
 
+# def get_protocol():
+#     # decide whether to enable ipv6 support
+#     return "tcp6-server"
+
 def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
@@ -651,6 +742,7 @@ def setup(ctx):
     """
     logging.info("Generating config for vpn daemons.")
     create_ca(ctx.obj["result_dir"])
+    create_crl(ctx.obj["result_dir"])
     create_psk(ctx.obj["result_dir"])
     create_server_cert(ctx.obj["result_dir"])
     create_server_config(ctx.obj["result_dir"], ctx.obj["status_dir"])
@@ -694,7 +786,6 @@ def list_clients(ctx):
         print(client)
 
 
-
 @cli.command()
 @click.pass_context
 @click.argument('client_name')
@@ -702,6 +793,7 @@ def remove_client(ctx, client_name):
     """Remove the client config.
     """
     client_name = client_name.lower()
+    revoke_client_cert(ctx.obj["result_dir"], client_name)
     try:
         os.rename(
             "{}/client-configs/{}.ovpn".format(ctx.obj["result_dir"], client_name),
