@@ -812,6 +812,7 @@ def remove_client(ctx, client_name):
             "{}/client-configs/{}.key.removed".format(ctx.obj["result_dir"], client_name))
     except FileNotFoundError:
         logging.warning("Could not find client private key.")
+    restart_daemons()
 
 
 if __name__ == "__main__":
