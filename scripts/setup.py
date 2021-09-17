@@ -588,8 +588,8 @@ def create_server_config(result_dir, status_dir):
     dns_search_domains = dns_info.get('search', [])
     dns_search_domains += get_config("additional-search-domains").split()
     tcp_context = {
-        'config_dir': '.',
-        'data_dir': '.',
+        'config_dir': result_dir,
+        'data_dir': result_dir,
         'dh': get_dh_params_path(result_dir),
         'status_file_path': "{}/tcp-server-status.log".format(status_dir),
         'servername': "easy-openvpn-server-1",
