@@ -1,6 +1,6 @@
 name: easy-openvpn-server
 title: Easy OpenVPN Server
-version: "0.1"
+version: "0.2"
 summary: A dead-simple OpenVPN server.
 description: | 
   A plug-and-play OpenVPN server that "Just Works" and has secure defaults.
@@ -61,7 +61,7 @@ description: |
 
 license: Apache-2.0
 
-base: core18
+base: core20
 grade: stable
 confinement: strict
 
@@ -143,7 +143,7 @@ parts:
       - requirements.txt 
     stage-packages:
       # Dependencies for `cryptography` on non-amd64 systems.
-      - libffi6
+      - libffi7
       - libssl1.1
       - python3-cryptography
     build-packages:
