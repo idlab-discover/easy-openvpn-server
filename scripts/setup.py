@@ -587,6 +587,27 @@ def create_server_config(result_dir, status_dir):
     (tcp_port, udp_port) = get_ports()
     dns_search_domains = dns_info.get('search', [])
     dns_search_domains += get_config("additional-search-domains").split()
+
+    # Make sure we don't advertise the networks of our public addresses
+    public_addresses = []
+    for address in get_public_addresses():
+        if isinstance(address, str):
+            try:
+                address = ip_address(address)
+                public_addresses.append(address)
+            except:
+                continue
+        else:
+            public_addresses.append(address)
+    internal_networks = []
+    for known_network in get_known_networks(remove_tunnels=True):
+        tainted = False
+        for address in public_addresses:
+            if address in known_network:
+                tainted = True
+        if not tainted:
+            internal_networks.append(known_network)
+
     tcp_context = {
         'config_dir': result_dir,
         'data_dir': result_dir,
@@ -601,7 +622,7 @@ def create_server_config(result_dir, status_dir):
         # Default to OpenDNS when no nameservers were found
         'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
         'dns_search_domains': dns_search_domains,
-        'internal_networks': get_known_networks(remove_tunnels=True),
+        'internal_networks': internal_networks,
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
         'tunnel_network_v6': str(tcp_tunnel_network_v6),
