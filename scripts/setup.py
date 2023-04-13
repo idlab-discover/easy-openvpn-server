@@ -221,7 +221,7 @@ def create_client_cert(result_dir, client_name):
     ).sign(ca_key, hashes.SHA256(), default_backend())
     # Write the certificate out to disk.
     with open("{}/client-configs/{}.crt".format(result_dir, client_name), "wb") as f:
-        f.write(cert.public_bytes(serialization.Encoding.PEM))    
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
 
 
 def create_crl(result_dir):
@@ -251,7 +251,7 @@ def create_crl(result_dir):
 def revoke_client_cert(result_dir, client_name):
     if not os.path.isfile("{}/crl.pem".format(result_dir)):
         create_crl(result_dir)
-    
+
     # cert you want to revoke
     try:
         cert_to_revoke_data = open("{}/client-configs/{}.crt".format(result_dir, client_name),"rb").read()
@@ -282,7 +282,7 @@ def revoke_client_cert(result_dir, client_name):
     builder = builder.next_update(datetime.datetime.now() + datetime.timedelta(days=36500))
 
     # add crl certificates from file to the new crl object
-    for i in range(0,len(crl)):    
+    for i in range(0,len(crl)):
         builder = builder.add_revoked_certificate(crl[i])
 
     # see if the cert to be revoked already in the list
@@ -296,7 +296,7 @@ def revoke_client_cert(result_dir, client_name):
             .revocation_date(datetime.datetime.now())
             .build(backend=default_backend())
         )
-        
+
         builder = builder.add_revoked_certificate(revoked_cert)
     else:
         logging.warning("cert already revoked")
@@ -581,6 +581,13 @@ def get_ports():
 #     # decide whether to enable ipv6 support
 #     return "tcp6-server"
 
+def get_compress():
+    compression = get_config("compression").casefold()
+    if compression == "no" or compression == "n" or compression == "off" or compression == "disabled" or compression == "disable":
+        compression = "no"
+    return compression
+
+
 def create_server_config(result_dir, status_dir):
     dns_info = get_dns_info()
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
@@ -626,6 +633,7 @@ def create_server_config(result_dir, status_dir):
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
         'tunnel_network_v6': str(tcp_tunnel_network_v6),
+        'compress': get_compress()
     }
     import jinja2
     j2_env = Environment(
@@ -684,9 +692,10 @@ def create_client_config(result_dir, name):
         'cert': client_cert_str,
         'key': client_key_str,
         'tls_auth': ta_key_str,
+        'compress': get_compress()
     }
     j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
         trim_blocks=True,
         lstrip_blocks=True)
     template = j2_env.get_template('client.ovpn')
