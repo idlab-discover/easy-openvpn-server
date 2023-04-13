@@ -61,7 +61,7 @@ description: |
   
   You can specify compression (disabled by default)
   
-  `sudo snap set easy-openvpn-server compression="lzo"`
+  `sudo snap set easy-openvpn-server compress="lzo"`
 
 license: Apache-2.0
 
