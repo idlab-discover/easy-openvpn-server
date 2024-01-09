@@ -1,6 +1,6 @@
 name: easy-openvpn-server
 title: Easy OpenVPN Server
-version: "0.2"
+version: "0.3"
 summary: A dead-simple OpenVPN server.
 description: | 
   A plug-and-play OpenVPN server that "Just Works" and has secure defaults.
@@ -58,7 +58,10 @@ description: |
   You can specify additional search domains.
 
   `sudo snap set easy-openvpn-server additional-search-domains="test"`
-
+website: https://github.com/idlab-discover/easy-openvpn-server
+contact: https://github.com/idlab-discover/easy-openvpn-server/issues
+issues: https://github.com/idlab-discover/easy-openvpn-server/issues
+source-code: https://github.com/idlab-discover/easy-openvpn-server
 license: Apache-2.0
 
 base: core18

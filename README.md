@@ -1,6 +1,6 @@
 # Easy OpenVPN Server
 
-[![Snap Status](https://build.snapcraft.io/badge/IBCNServices/easy-openvpn-server.svg)](https://build.snapcraft.io/user/IBCNServices/easy-openvpn-server) [![Minecraft Installer](https://snapcraft.io/easy-openvpn-server/badge.svg)](https://snapcraft.io/easy-openvpn-server)
+[![Snap Status](https://build.snapcraft.io/badge/idlab-discover/easy-openvpn-server.svg)](https://build.snapcraft.io/user/idlab-discover/easy-openvpn-server) [![Easy Openvpn Server](https://snapcraft.io/easy-openvpn-server/badge.svg)](https://snapcraft.io/easy-openvpn-server)
 
 A plug-and-play OpenVPN server that "Just Works" and has secure defaults.
 
@@ -103,7 +103,7 @@ Wireguard is a great tool for connecting networks over an untrusted *but coopera
 
 ### Is this VPN secure?
 
-This VPN is _intended_ to be secure. It uses very secure encryption, DDoS protection and more. However, I am not a security expert, so it is definitely possible I made a mistake which causes it to be less secure.
+This VPN is *intended* to be secure. It uses very secure encryption, DDoS protection and more. However, I am not a security expert, so it is definitely possible I made a mistake which causes it to be less secure.
 
 You can verify the security yourself by looking at the generated configuration files in `/root/snap/easy-openvpn-server/current/`. If you find any issues, please let me know either on GitHub or by contacting me directly.
 
