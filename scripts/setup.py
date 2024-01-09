@@ -334,7 +334,7 @@ def create_psk(result_dir):
     # config files.
     if os.path.isfile("{}/ta.key".format(result_dir)):
         return
-    subprocess.check_call(["openvpn", "--genkey", "--secret", "{}/ta.key".format(result_dir)])
+    subprocess.check_call(["openvpn", "--genkey", "secret", "{}/ta.key".format(result_dir)])
 
 
 #

@@ -64,7 +64,7 @@ issues: https://github.com/idlab-discover/easy-openvpn-server/issues
 source-code: https://github.com/idlab-discover/easy-openvpn-server
 license: Apache-2.0
 
-base: core18
+base: core22
 grade: stable
 confinement: strict
 
@@ -142,20 +142,18 @@ parts:
   scripts-dependencies:
     plugin: python
     source: easy-openvpn-server
-    requirements:
+    python-requirements:
       - requirements.txt 
     stage-packages:
+      - iproute2
       # Dependencies for `cryptography` on non-amd64 systems.
-      - libffi6
-      - libssl1.1
-      - python3-cryptography
+      - libffi8
+      - libssl3
     build-packages:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential
-      - python-dev
       - libffi-dev
       - libssl-dev
-      - python3-setuptools-rust
   templates:
     plugin: dump
     source: templates
