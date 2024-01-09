@@ -238,8 +238,8 @@ def create_crl(result_dir):
         ca_key = load_pem_private_key(data, None, default_backend())
 
     builder = x509.CertificateRevocationListBuilder()
-    builder = builder.last_update(datetime.datetime.now())
-    builder = builder.next_update(datetime.datetime.now() + datetime.timedelta(days=36500))
+    builder = builder.last_update(datetime.datetime.utcnow())
+    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
     builder = builder.issuer_name(ca_cert.issuer)
 
     cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
@@ -279,7 +279,7 @@ def revoke_client_cert(result_dir, client_name):
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(crl.issuer)
     builder = builder.last_update(crl.last_update)
-    builder = builder.next_update(datetime.datetime.now() + datetime.timedelta(days=36500))
+    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
 
     # add crl certificates from file to the new crl object
     for i in range(0,len(crl)):    
@@ -293,7 +293,7 @@ def revoke_client_cert(result_dir, client_name):
         revoked_cert = (
             x509.RevokedCertificateBuilder()
             .serial_number(cert_to_revoke.serial_number)
-            .revocation_date(datetime.datetime.now())
+            .revocation_date(datetime.datetime.utcnow())
             .build(backend=default_backend())
         )
         
