@@ -85,6 +85,12 @@ You can specify additional search domains.
 sudo snap set easy-openvpn-server additional-search-domains="test"
 ```
 
+You can specify compression (disabled by default)
+```bash
+sudo snap set easy-openvpn-server compress="lzo" 
+```
+
+
 ## FAQ
 
 ### Why OpenVPN instead of Wireguard?
