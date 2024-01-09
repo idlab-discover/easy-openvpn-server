@@ -155,6 +155,7 @@ parts:
       - python-dev
       - libffi-dev
       - libssl-dev
+      - python3-setuptools-rust
   templates:
     plugin: dump
     source: templates
