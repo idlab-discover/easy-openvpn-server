@@ -81,7 +81,7 @@ apps:
     plugs:
       - network
       - network-bind
-      - network-observe
+#      - network-control
 #      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
@@ -93,7 +93,7 @@ apps:
     plugs:
       - network
       - network-bind
-      - network-observe
+#      - network-control
 #      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
@@ -106,7 +106,7 @@ apps:
     plugs:
       - network
       - network-bind
-      - network-observe
+#      - network-control
 #      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
@@ -122,7 +122,7 @@ hooks:
   configure:
     plugs:
       - network
-      - network-observe
+#      - network-control
 #  connect-plug-network-control: {}
 #  connect-plug-firewall-control: {}
   
