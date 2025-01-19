@@ -81,8 +81,8 @@ apps:
     plugs:
       - network
       - network-bind
-#      - network-control
-#      - firewall-control
+      - network-control
+      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   udp-server:
@@ -93,8 +93,8 @@ apps:
     plugs:
       - network
       - network-bind
-#      - network-control
-#      - firewall-control
+      - network-control
+      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   status:
@@ -106,8 +106,8 @@ apps:
     plugs:
       - network
       - network-bind
-#      - network-control
-#      - firewall-control
+      - network-control
+      - firewall-control
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   easy-openvpn-server:
@@ -122,9 +122,9 @@ hooks:
   configure:
     plugs:
       - network
-#      - network-control
-#  connect-plug-network-control: {}
-#  connect-plug-firewall-control: {}
+      - network-control
+  connect-plug-network-control: {}
+  connect-plug-firewall-control: {}
   
 
 parts:
