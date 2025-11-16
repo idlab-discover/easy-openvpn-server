@@ -581,7 +581,7 @@ def get_ports():
 #     # decide whether to enable ipv6 support
 #     return "tcp6-server"
 
-def create_server_config(result_dir, status_dir):
+def create_server_config(result_dir, status_dir, daemon_dir):
     dns_info = get_dns_info()
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
@@ -610,6 +610,7 @@ def create_server_config(result_dir, status_dir):
 
     tcp_context = {
         'config_dir': result_dir,
+        'client_config_dir': "{}/ccd".format(daemon_dir),
         'data_dir': result_dir,
         'dh': get_dh_params_path(result_dir),
         'status_file_path': "{}/tcp-server-status.log".format(status_dir),
@@ -654,6 +655,14 @@ def create_server_config(result_dir, status_dir):
     output = template.render(output=result_dir, **udp_context)
     with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+
+
+def create_client_config_dir(daemon_dir):
+    try:
+        os.makedirs("{}/ccd".format(daemon_dir))
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            raise
 
 
 def create_client_configs_dir(result_dir):
@@ -753,6 +762,7 @@ def cli(ctx):
         exit(1)
     ctx.obj = {}
     ctx.obj["result_dir"] = os.environ['SNAP_USER_DATA']
+    ctx.obj["daemon_dir"] = os.environ['SNAP_COMMON']
     ctx.obj["status_dir"] = os.environ['SNAP_DATA']
 
 
@@ -766,8 +776,9 @@ def setup(ctx):
     create_crl(ctx.obj["result_dir"])
     create_psk(ctx.obj["result_dir"])
     create_server_cert(ctx.obj["result_dir"])
-    create_server_config(ctx.obj["result_dir"], ctx.obj["status_dir"])
+    create_server_config(ctx.obj["result_dir"], ctx.obj["status_dir"], ctx.obj["daemon_dir"])
     create_status_files(ctx.obj["status_dir"])
+    create_client_config_dir(ctx.obj["daemon_dir"])
     create_client_configs_dir(ctx.obj["result_dir"])
     restart_daemons()
     create_client_cert(ctx.obj["result_dir"], "default")

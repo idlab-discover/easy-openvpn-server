@@ -85,6 +85,20 @@ You can specify additional search domains.
 sudo snap set easy-openvpn-server additional-search-domains="test"
 ```
 
+## Client-specific rules and access policies
+
+You can give individual clients specific policies by creating a file with the name of that client in the following directory.
+
+```txt
+/var/snap/easy-openvpn-server/common/ccd/
+```
+
+For example, if you want the client `sysadmin` to always have the IP `10.8.1.1`, then add the following line to the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin`
+
+```txt
+ifconfig-push 10.8.1.1 10.8.1.2
+```
+
 ## FAQ
 
 ### Why OpenVPN instead of Wireguard?
