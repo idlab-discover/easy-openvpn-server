@@ -99,6 +99,8 @@ For example, if you want the client `sysadmin` to always have the IP `10.8.1.1`,
 ifconfig-push 10.8.1.1 10.8.1.2
 ```
 
+> Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin/DEFAULT`
+
 ## FAQ
 
 ### Why OpenVPN instead of Wireguard?

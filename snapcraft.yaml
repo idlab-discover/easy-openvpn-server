@@ -69,6 +69,8 @@ description: |
 
   `ifconfig-push 10.8.1.1 10.8.1.2`
 
+  Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin/DEFAULT`
+
 website: https://github.com/idlab-discover/easy-openvpn-server
 contact: https://github.com/idlab-discover/easy-openvpn-server/issues
 issues: https://github.com/idlab-discover/easy-openvpn-server/issues
