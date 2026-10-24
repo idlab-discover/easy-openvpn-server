@@ -5,12 +5,14 @@
 # the snap under test and checks that old and new client configs still work.
 #
 # Usage:
-#   tests/harness.sh [--snap FILE | --channel CHANNEL | --candidate] [--keep]
+#   tests/harness.sh [--snap FILE | --channel CHANNEL | --candidate] [--server-release R] [--keep]
 #
 #   --snap FILE        upgrade to this local .snap file
 #   --channel CHANNEL  upgrade to this store channel
 #   --candidate        same as --channel latest/candidate
 #   --keep             don't delete the LXD instances and networks afterwards
+#   --server-release R Ubuntu release of the server VM (default 24.04). Use
+#                      26.04 to test with the in-kernel OpenVPN data channel (DCO).
 #
 # Without --snap or --channel, only the stable snap is tested (baseline).
 #
@@ -45,6 +47,10 @@ while [[ $# -gt 0 ]]; do
         --keep)
             KEEP=true
             shift
+            ;;
+        --server-release)
+            SERVER_RELEASE="$2"
+            shift 2
             ;;
         *)
             echo "Unknown argument: $1" >&2
@@ -111,6 +117,10 @@ scenario_upgrade() {
     for c in "${CLIENTS[@]}"; do
         if require "$c: old default.ovpn connects over udp" client_connect "$c" "$WORK/old-default-udp.ovpn"; then
             check "$c: reaches lan host through the VPN (udp)" reaches_via_vpn "$c" "$LANHOST_IP"
+            if [[ -n "$UPGRADE_TO" ]]; then
+                check "$c: old config with comp-lzo is told to stop compressing" client_told_to_stop_compressing "$c"
+                check_not "$c: old config doesn't compress" client_compresses "$c"
+            fi
         else
             client_log "$c" >"$WORK/$c-udp.log"
         fi
@@ -227,6 +237,7 @@ scenario_fresh_install() {
     for c in "${CLIENTS[@]}"; do
         if require "$c: new default.ovpn connects over udp" client_connect "$c" "$WORK/new-default-udp.ovpn"; then
             check "$c: reaches lan host through the VPN (udp, new config)" reaches_via_vpn "$c" "$LANHOST_IP"
+            check_not "$c: new config doesn't compress" client_compresses "$c"
         else
             client_log "$c" >"$WORK/$c-new-udp.log"
         fi

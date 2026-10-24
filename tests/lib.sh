@@ -27,6 +27,7 @@ SERVER_LAN_IP=10.251.0.10
 LANHOST_IP=10.251.0.20
 METADATA_IP=169.254.169.254
 SNAP_NAME=easy-openvpn-server
+SERVER_RELEASE="${SERVER_RELEASE:-24.04}"
 
 PASSED=0
 FAILED=0
@@ -163,8 +164,8 @@ create_server() {
         log "Deleting old $SERVER"
         lx delete -f "$SERVER"
     fi
-    log "Creating $SERVER (VM)"
-    lx init ubuntu:24.04 "$SERVER" --vm -n "$WAN_NET" -q -c limits.cpu=2 -c limits.memory=2GiB
+    log "Creating $SERVER (VM, Ubuntu $SERVER_RELEASE)"
+    lx init "ubuntu:$SERVER_RELEASE" "$SERVER" --vm -n "$WAN_NET" -q -c limits.cpu=2 -c limits.memory=2GiB
     lx config device set "$SERVER" eth0 ipv4.address="$SERVER_WAN_IP" hwaddr=00:16:3e:e0:00:10
     lx config device add "$SERVER" eth1 nic network="$LAN_NET" ipv4.address="$SERVER_LAN_IP" \
         hwaddr=00:16:3e:e0:01:10 >/dev/null
@@ -274,7 +275,16 @@ client_connect() {
     lx exec "$c" -- rm -f /root/test.log
     # `--mute 0` overrides `mute 20` in the config, which otherwise can hide
     # the "Initialization Sequence Completed" line we wait for.
-    lx exec "$c" -- openvpn --config /root/test.ovpn --mute 0 --daemon --log /root/test.log \
+    # `--disable-dco`: unprivileged containers can't use the kernel data
+    # channel (DCO). Without compression, 2.6+ clients would try to. 2.5
+    # doesn't have DCO, or the option.
+    local extra=() help
+    # `openvpn --help` exits non-zero, so don't use it in a pipeline condition.
+    help="$(lxc exec "$c" -- openvpn --help 2>&1 | cat || true)"
+    if [[ "$help" == *--disable-dco* ]]; then
+        extra=(--disable-dco)
+    fi
+    lx exec "$c" -- openvpn --config /root/test.ovpn --mute 0 "${extra[@]}" --daemon --log /root/test.log \
         --writepid /root/test.pid >/dev/null 2>&1
     retry 30 lxc exec "$c" -- grep -q "Initialization Sequence Completed" /root/test.log
 }
@@ -286,7 +296,7 @@ client_disconnect() {
 }
 
 client_log() {
-    lxc exec "$1" -- cat /root/test.log 2>/dev/null | cat
+    lxc exec "$1" -- cat /root/test.log 2>/dev/null | cat || true
 }
 
 # client_fetch <container> <ip>: HTTP GET to the lanhost; prints the source
@@ -374,4 +384,18 @@ warning_in_cli() {
 
 warning_in_journal() {
     lxc exec "$SERVER" -- journalctl -u "snap.$SNAP_NAME.udp-server" --no-pager 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+}
+
+# True when the client's data channel compresses: it says so (2.6+), or the
+# server pushed it compression options.
+client_compresses() {
+    local log
+    log="$(client_log "$1")"
+    grep -E "compression: '(lzo|lz4)" <<<"$log" >/dev/null ||
+        grep 'PUSH_REPLY' <<<"$log" | grep -E 'comp-lzo( yes|,)|compress (lzo|lz4)' >/dev/null
+}
+
+# True when the server told the client to stop compressing (`compress migrate`).
+client_told_to_stop_compressing() {
+    client_log "$1" | grep 'PUSH_REPLY' | grep 'compress stub-v2' >/dev/null
 }
