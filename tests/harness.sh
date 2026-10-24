@@ -96,7 +96,7 @@ scenario_upgrade() {
     local bob_ip
     bob_ip="$(udp_tun_prefix).101"
     srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/$SNAP_NAME/current/client-configs/bob"
-    if check "eovpn-c24: bob connects to stable" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
+    if require "eovpn-c24: bob connects to stable" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
         check_not "stable ignores client-configs/bob" client_has_ip eovpn-c24 "$bob_ip"
     fi
     client_disconnect eovpn-c24
@@ -109,14 +109,14 @@ scenario_upgrade() {
     only_proto tcp "$WORK/old-default.ovpn" "$WORK/old-default-tcp.ovpn"
     local c
     for c in "${CLIENTS[@]}"; do
-        if check "$c: old default.ovpn connects over udp" client_connect "$c" "$WORK/old-default-udp.ovpn"; then
+        if require "$c: old default.ovpn connects over udp" client_connect "$c" "$WORK/old-default-udp.ovpn"; then
             check "$c: reaches lan host through the VPN (udp)" reaches_via_vpn "$c" "$LANHOST_IP"
         else
             client_log "$c" >"$WORK/$c-udp.log"
         fi
         client_disconnect "$c"
     done
-    if check "eovpn-c24: old default.ovpn connects over tcp" client_connect eovpn-c24 "$WORK/old-default-tcp.ovpn"; then
+    if require "eovpn-c24: old default.ovpn connects over tcp" client_connect eovpn-c24 "$WORK/old-default-tcp.ovpn"; then
         check "eovpn-c24: reaches lan host through the VPN (tcp)" reaches_via_vpn eovpn-c24 "$LANHOST_IP"
     else
         client_log eovpn-c24 >"$WORK/eovpn-c24-tcp.log"
@@ -145,18 +145,40 @@ scenario_ccd() {
     bob_ip="$(udp_tun_prefix).101"
     srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
     srv sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
-    if check "eovpn-c24: bob connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
+    if require "eovpn-c24: bob connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
         check "ccd/bob gives bob its fixed address" client_has_ip eovpn-c24 "$bob_ip"
         check_not "ccd/DEFAULT doesn't apply to bob, who has his own file" client_has_route eovpn-c24 192.0.2.0/24
     fi
     client_disconnect eovpn-c24
-    if check "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
+    if require "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
         check "ccd/DEFAULT applies to clients without their own file" client_has_route eovpn-c24 192.0.2.0/24
     fi
     client_disconnect eovpn-c24
     srv rm -f "$ccd/bob" "$ccd/DEFAULT"
     check "setup warns about files in the old client-configs folder" \
         sh -c "lxc exec $SERVER -- $SNAP_NAME setup 2>&1 | grep -q 'client-specific config'"
+    wait_for_daemons
+}
+
+# 5. Firewall rules for traffic from VPN clients.
+scenario_firewall() {
+    log "Scenario 5: firewall"
+    if require "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
+        check "eovpn-c24: lan host is reachable through the VPN" reaches_via_vpn eovpn-c24 "$LANHOST_IP"
+        check_not "eovpn-c24: cloud metadata ($METADATA_IP) is blocked" reaches_via_vpn eovpn-c24 "$METADATA_IP"
+    fi
+    client_disconnect eovpn-c24
+    check "DNS servers pushed to clients are exempt from the blocks" \
+        sh -c "lxc exec $SERVER -- iptables -S eovpn-udp-server | grep -q -- '--dport 53 -j RETURN'"
+
+    srv snap restart "$SNAP_NAME" >/dev/null
+    wait_for_daemons
+    check "no duplicate rules after a restart (iptables)" fw_rule_count iptables 2
+    check "no duplicate rules after a restart (ip6tables)" fw_rule_count ip6tables 2
+    srv snap stop "$SNAP_NAME" >/dev/null
+    check "no rules left after stopping (iptables)" fw_rule_count iptables 0
+    check "no rules left after stopping (ip6tables)" fw_rule_count ip6tables 0
+    srv snap start "$SNAP_NAME" >/dev/null
     wait_for_daemons
 }
 
@@ -173,19 +195,19 @@ scenario_fresh_install() {
     else
         install_snap_from_store "$UPGRADE_TO"
     fi
-    check "export default.ovpn from fresh install" export_client default "$WORK/new-default.ovpn" || return 0
+    if ! require "export default.ovpn from fresh install" export_client default "$WORK/new-default.ovpn"; then return 0; fi
     only_proto udp "$WORK/new-default.ovpn" "$WORK/new-default-udp.ovpn"
     only_proto tcp "$WORK/new-default.ovpn" "$WORK/new-default-tcp.ovpn"
     local c
     for c in "${CLIENTS[@]}"; do
-        if check "$c: new default.ovpn connects over udp" client_connect "$c" "$WORK/new-default-udp.ovpn"; then
+        if require "$c: new default.ovpn connects over udp" client_connect "$c" "$WORK/new-default-udp.ovpn"; then
             check "$c: reaches lan host through the VPN (udp, new config)" reaches_via_vpn "$c" "$LANHOST_IP"
         else
             client_log "$c" >"$WORK/$c-new-udp.log"
         fi
         client_disconnect "$c"
     done
-    if check "eovpn-c26: new default.ovpn connects over tcp" client_connect eovpn-c26 "$WORK/new-default-tcp.ovpn"; then
+    if require "eovpn-c26: new default.ovpn connects over tcp" client_connect eovpn-c26 "$WORK/new-default-tcp.ovpn"; then
         check "eovpn-c26: reaches lan host through the VPN (tcp, new config)" reaches_via_vpn eovpn-c26 "$LANHOST_IP"
     else
         client_log eovpn-c26 >"$WORK/eovpn-c26-new-tcp.log"
@@ -199,5 +221,6 @@ scenario_upgrade
 scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
+    scenario_firewall
     scenario_fresh_install
 fi

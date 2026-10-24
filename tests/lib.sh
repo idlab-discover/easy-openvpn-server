@@ -54,28 +54,30 @@ fail() {
     printf '\033[31mFAIL\033[0m %s\n' "$*" >&2
 }
 
-# check "description" command...: PASS if the command succeeds.
-# Returns whether it passed, so callers can skip dependent checks.
+# check "description" command...: PASS if the command succeeds. Always
+# returns 0, so a failure doesn't abort the harness (`set -e`).
 check() {
-    local desc="$1"
-    shift
-    if "$@"; then
-        pass "$desc"
-    else
-        fail "$desc"
-        return 1
-    fi
+    require "$@" || true
 }
 
 # check_not "description" command...: PASS if the command fails.
 check_not() {
     local desc="$1"
     shift
+    if "$@"; then fail "$desc"; else pass "$desc"; fi
+}
+
+# require "description" command...: like check, but returns whether it
+# passed. Only use it as a condition (`if require ...`), to skip checks that
+# depend on it.
+require() {
+    local desc="$1"
+    shift
     if "$@"; then
+        pass "$desc"
+    else
         fail "$desc"
         return 1
-    else
-        pass "$desc"
     fi
 }
 
@@ -314,4 +316,15 @@ client_has_ip() {
 
 client_has_route() {
     lxc exec "$1" -- ip -4 route show "$2" | cat | grep -q tun0
+}
+
+# fw_rule_count <iptables|ip6tables> <n>: true when there are exactly n of our
+# rules in FORWARD and n in nat POSTROUTING (one per daemon), and when there
+# are none, also no leftover chains.
+fw_rule_count() {
+    local cmd="$1" n="$2" forward nat chains
+    forward="$(lxc exec "$SERVER" -- "$cmd" -S FORWARD | cat | grep -c 'easy-openvpn-server' || true)"
+    nat="$(lxc exec "$SERVER" -- "$cmd" -t nat -S POSTROUTING | cat | grep -c 'easy-openvpn-server' || true)"
+    chains="$(lxc exec "$SERVER" -- "$cmd" -S | cat | grep -c '^-N eovpn-' || true)"
+    [[ "$forward" == "$n" && "$nat" == "$n" && "$chains" == "$n" ]]
 }
