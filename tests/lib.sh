@@ -296,3 +296,8 @@ client_fetch() {
 reaches_via_vpn() {
     [[ "$(client_fetch "$1" "$2")" == "$SERVER_LAN_IP" ]]
 }
+
+# snapcmd <args>: run `easy-openvpn-server <args>` on the server, quietly.
+snapcmd() {
+    lxc exec "$SERVER" -- "$SNAP_NAME" "$@" >/dev/null 2>&1
+}
