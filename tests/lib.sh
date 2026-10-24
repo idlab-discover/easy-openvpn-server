@@ -399,3 +399,28 @@ client_compresses() {
 client_told_to_stop_compressing() {
     client_log "$1" | grep 'PUSH_REPLY' | grep 'compress stub-v2' >/dev/null
 }
+
+# True when the client's data channel uses one of the AEAD ciphers we allow.
+client_uses_aead_cipher() {
+    client_log "$1" | grep -iE "data channel.*'(AES-256-GCM|CHACHA20-POLY1305|AES-128-GCM)'" >/dev/null
+}
+
+client_got_pushed() {
+    client_log "$1" | grep 'PUSH_REPLY' | grep -- "$2" >/dev/null
+}
+
+# with_server_cert <in.ovpn> <out.ovpn>: replace the client's cert and key
+# with the server's, to check the server rejects non-client certificates.
+with_server_cert() {
+    local dir="/root/snap/$SNAP_NAME/current"
+    python3 -I - "$1" "$2" \
+        "$(lxc exec "$SERVER" -- cat "$dir/server.crt" | cat)" \
+        "$(lxc exec "$SERVER" -- cat "$dir/server.key" | cat)" <<'PY'
+import re, sys
+src, dst, cert, key = sys.argv[1:]
+config = open(src).read()
+config = re.sub(r"<cert>.*?</cert>", lambda m: "<cert>\n" + cert.strip() + "\n</cert>", config, flags=re.S)
+config = re.sub(r"<key>.*?</key>", lambda m: "<key>\n" + key.strip() + "\n</key>", config, flags=re.S)
+open(dst, "w").write(config)
+PY
+}
