@@ -408,9 +408,11 @@ def get_dns_info():
     # resolvd, we can scan its file. Otherwise, don't pass a nameserver.
     loopback_ns = False
     for ns_address in info['nameservers']:
-        ns_address = IPv4Address(ns_address)
-        if ns_address.is_loopback:
-            loopback_ns = True
+        try:
+            if ip_address(ns_address).is_loopback:
+                loopback_ns = True
+        except ValueError:
+            pass
 
     if loopback_ns:
         info['nameservers'] = []
@@ -420,6 +422,36 @@ def get_dns_info():
         except FileNotFoundError:
             pass
     return info
+
+
+# Used when the server has no IPv4 nameserver we can push.
+FALLBACK_DNS_SERVERS = ["208.67.222.222", "208.67.220.220"]  # OpenDNS
+
+
+def get_dns_servers(dns_info):
+    '''Returns the IPv4 and IPv6 nameservers to push to clients. Always
+    returns at least one IPv4 nameserver, so clients without IPv6 can
+    resolve names too.
+    '''
+    servers_v4 = []
+    servers_v6 = []
+    for ns_address in dns_info.get('nameservers', []):
+        try:
+            address = ip_address(ns_address)
+        except ValueError:
+            # e.g. a link-local address with a zone: `fe80::1%eth0`
+            logging.info("Not pushing nameserver {}: clients can't reach it.".format(ns_address))
+            continue
+        if address.is_loopback or (address.is_link_local and address.version == 6):
+            logging.info("Not pushing nameserver {}: clients can't reach it.".format(ns_address))
+        elif address.version == 4:
+            servers_v4.append(str(address))
+        else:
+            servers_v6.append(str(address))
+    if not servers_v4:
+        logging.info("No IPv4 nameserver found, also pushing {}.".format(", ".join(FALLBACK_DNS_SERVERS)))
+        servers_v4 = list(FALLBACK_DNS_SERVERS)
+    return (servers_v4, servers_v6)
 
 
 def parse_resolvconf(resolv_path):
@@ -665,6 +697,7 @@ def get_ports():
 
 def create_server_config(result_dir, status_dir, daemon_dir):
     dns_info = get_dns_info()
+    (dns_servers_v4, dns_servers_v6) = get_dns_servers(dns_info)
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
     dns_search_domains = dns_info.get('search', [])
@@ -705,8 +738,9 @@ def create_server_config(result_dir, status_dir, daemon_dir):
         'duplicate_cn': True,
         'push_dns': True,
         'push_default_gateway': get_push_default_gateway(),
-        # Default to OpenDNS when no nameservers were found
-        'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
+        # IPv4 first: clients without IPv6 have to be able to use the first one.
+        'dns_servers': dns_servers_v4,
+        'dns_servers_v6': dns_servers_v6,
         'dns_search_domains': dns_search_domains,
         'internal_networks': internal_networks,
         'tunnel_network': str(tcp_tunnel_network.network_address),
