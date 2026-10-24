@@ -109,6 +109,42 @@ scenario_upgrade() {
     client_disconnect eovpn-c24
 }
 
+# 2. A fresh install of the snap under test works, and new configs connect.
+scenario_fresh_install() {
+    log "Scenario 2: fresh install"
+    srv snap remove --purge "$SNAP_NAME" >/dev/null
+    if [[ -f "$UPGRADE_TO" ]]; then
+        lx file push "$UPGRADE_TO" "$SERVER/root/under-test.snap"
+        srv snap install --dangerous /root/under-test.snap >/dev/null
+        srv snap connect "$SNAP_NAME:network-control"
+        srv snap connect "$SNAP_NAME:firewall-control"
+        wait_for_daemons
+    else
+        install_snap_from_store "$UPGRADE_TO"
+    fi
+    check "export default.ovpn from fresh install" export_client default "$WORK/new-default.ovpn" || return 0
+    only_proto udp "$WORK/new-default.ovpn" "$WORK/new-default-udp.ovpn"
+    only_proto tcp "$WORK/new-default.ovpn" "$WORK/new-default-tcp.ovpn"
+    local c
+    for c in "${CLIENTS[@]}"; do
+        if check "$c: new default.ovpn connects over udp" client_connect "$c" "$WORK/new-default-udp.ovpn"; then
+            check "$c: reaches lan host through the VPN (udp, new config)" reaches_via_vpn "$c" "$LANHOST_IP"
+        else
+            client_log "$c" >"$WORK/$c-new-udp.log"
+        fi
+        client_disconnect "$c"
+    done
+    if check "eovpn-c26: new default.ovpn connects over tcp" client_connect eovpn-c26 "$WORK/new-default-tcp.ovpn"; then
+        check "eovpn-c26: reaches lan host through the VPN (tcp, new config)" reaches_via_vpn eovpn-c26 "$LANHOST_IP"
+    else
+        client_log eovpn-c26 >"$WORK/eovpn-c26-new-tcp.log"
+    fi
+    client_disconnect eovpn-c26
+}
+
 log "Work directory: $WORK"
 setup_topology
 scenario_upgrade
+if [[ -n "$UPGRADE_TO" ]]; then
+    scenario_fresh_install
+fi

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import datetime
-from distutils.util import strtobool
 import errno
 import grp
 from ipaddress import IPv4Address, IPv6Address, IPv6Network, ip_address, ip_network
@@ -80,10 +79,10 @@ def create_ca(result_dir):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=True, path_length=None), critical=True,
     # Sign the certificate with the CA private key (self-signed)
@@ -123,10 +122,10 @@ def create_server_cert(result_dir):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         # Make it clear this is a server key.
         # More explanation:
@@ -188,10 +187,10 @@ def create_client_cert(result_dir, client_name):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=False, path_length=None),
         critical=False,
@@ -238,8 +237,8 @@ def create_crl(result_dir):
         ca_key = load_pem_private_key(data, None, default_backend())
 
     builder = x509.CertificateRevocationListBuilder()
-    builder = builder.last_update(datetime.datetime.utcnow())
-    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
+    builder = builder.last_update(datetime.datetime.now(datetime.timezone.utc))
+    builder = builder.next_update(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500))
     builder = builder.issuer_name(ca_cert.issuer)
 
     cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
@@ -278,8 +277,8 @@ def revoke_client_cert(result_dir, client_name):
     # generate a new crl object
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(crl.issuer)
-    builder = builder.last_update(crl.last_update)
-    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
+    builder = builder.last_update(crl.last_update_utc)
+    builder = builder.next_update(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500))
 
     # add crl certificates from file to the new crl object
     for i in range(0,len(crl)):    
@@ -293,7 +292,7 @@ def revoke_client_cert(result_dir, client_name):
         revoked_cert = (
             x509.RevokedCertificateBuilder()
             .serial_number(cert_to_revoke.serial_number)
-            .revocation_date(datetime.datetime.utcnow())
+            .revocation_date(datetime.datetime.now(datetime.timezone.utc))
             .build(backend=default_backend())
         )
         
@@ -499,6 +498,17 @@ def pick_tun_networks_v6():
         ula.network_address + (random.getrandbits(64 - ula.prefixlen) << 64 ),
         64))
     return [tun1, tun2]
+
+
+def strtobool(value):
+    '''Same as the removed `distutils.util.strtobool`.
+    '''
+    value = value.lower()
+    if value in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    if value in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    raise ValueError("invalid truth value {!r}".format(value))
 
 
 def get_push_default_gateway():

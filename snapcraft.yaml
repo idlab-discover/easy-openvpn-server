@@ -77,9 +77,17 @@ issues: https://github.com/idlab-discover/easy-openvpn-server/issues
 source-code: https://github.com/idlab-discover/easy-openvpn-server
 license: Apache-2.0
 
-base: core22
+base: core26
 grade: stable
 confinement: strict
+
+platforms:
+  amd64:
+  arm64:
+  armhf:
+  ppc64el:
+  s390x:
+  riscv64:
 
 passthrough:
   system-usernames:
@@ -124,7 +132,9 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   easy-openvpn-server:
-    command: bin/setup.py
+    # Use the venv's interpreter explicitly: `$SNAP/usr/bin/python3` comes
+    # first in PATH and doesn't have our dependencies.
+    command: bin/python3 $SNAP/bin/setup.py
     plugs:
       - network    
     environment:
@@ -147,21 +157,38 @@ parts:
       - openvpn
       - iptables
       - libatm1
+    # The `iptables` command is normally set up by update-alternatives, which
+    # doesn't run for stage-packages. core22 provided it in the base; core26
+    # doesn't. Use the nft backend, like core22 did.
+    override-build: |
+      craftctl default
+      ln -sf iptables-nft "$CRAFT_PART_INSTALL/usr/sbin/iptables"
+      ln -sf ip6tables-nft "$CRAFT_PART_INSTALL/usr/sbin/ip6tables"
   scripts:
     plugin: dump
     source: scripts
     organize:
       "*": bin/
+  # core26 doesn't ship Python, so we bring our own.
+  python-runtime:
+    plugin: nil
+    stage-packages:
+      - libpython3.14-minimal
+      - libpython3.14-stdlib
+      - python3-minimal
+      - python3.14-minimal
+      - python3.14-venv
   scripts-dependencies:
+    after: [python-runtime]
     plugin: python
     source: easy-openvpn-server
     python-requirements:
-      - requirements.txt 
+      - requirements.txt
     stage-packages:
       - iproute2
       # Dependencies for `cryptography` on non-amd64 systems.
       - libffi8
-      - libssl3
+      - libssl3t64
     build-packages:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential
