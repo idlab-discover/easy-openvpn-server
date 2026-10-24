@@ -22,8 +22,9 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
 2. Copy the client config to your personal device.
 
    ```bash
-   # Run this on the _server_ to create the config file.
-   sudo easy-openvpn-server show-client default > default.ovpn
+   # Run this on the _server_ to create the config file. `umask 077` makes
+   # sure only you can read it: it contains the client's private key.
+   (umask 077; sudo easy-openvpn-server show-client default > default.ovpn)
    ```
 
    and from your device
@@ -32,6 +33,8 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
    # Run this on the _client_ to download the config file.
    scp my-user@my-server:~/default.ovpn .
    ```
+
+   Then remove `default.ovpn` from the server.
 
 3. Import the `.ovpn` config file into the VPN application of your device.
 
@@ -47,7 +50,7 @@ The snap automatically creates a client profile and config with the name `defaul
 # Add the client
 sudo easy-openvpn-server add-client alice
 # Get the client config
-sudo easy-openvpn-server show-client alice > alice.ovpn
+(umask 077; sudo easy-openvpn-server show-client alice > alice.ovpn)
 # Remove the client
 sudo easy-openvpn-server remove-client alice
 ```

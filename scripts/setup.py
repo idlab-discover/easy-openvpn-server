@@ -759,8 +759,12 @@ def create_client_config(result_dir, name):
         lstrip_blocks=True)
     template = j2_env.get_template('client.ovpn')
     output = template.render(output=result_dir, **context)
-    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
+    # The config contains the client's private key: only root may read it.
+    path = "{}/client-configs/{}.ovpn".format(result_dir, name)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
         f.write(output)
+    # Also fix files created by older versions.
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def show_client_config(result_dir, name):
@@ -875,7 +879,7 @@ def add_client(ctx, client_name):
     create_client_config(ctx.obj["result_dir"], client_name)
     logging.info(
         "Added {name}. You can copy its config using\n"
-        "\tsudo easy-openvpn-server show-client {name} > {name}.ovpn".format(
+        "\t(umask 077; sudo easy-openvpn-server show-client {name} > {name}.ovpn)".format(
             name=client_name))
 
 

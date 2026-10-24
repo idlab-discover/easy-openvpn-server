@@ -424,3 +424,9 @@ config = re.sub(r"<key>.*?</key>", lambda m: "<key>\n" + key.strip() + "\n</key>
 open(dst, "w").write(config)
 PY
 }
+
+ovpn_files_are_private() {
+    local modes
+    modes="$(lxc exec "$SERVER" -- sh -c "stat -c %a /root/snap/$SNAP_NAME/current/client-configs/*.ovpn" | cat)"
+    [[ -n "$modes" ]] && ! grep -v '^600$' <<<"$modes" >/dev/null
+}

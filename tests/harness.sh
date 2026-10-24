@@ -217,6 +217,12 @@ scenario_client_to_client() {
     wait_for_daemons
 }
 
+# 7. Client config files and input validation.
+scenario_hygiene() {
+    log "Scenario 7: file permissions and input validation"
+    check "client configs (with private keys) are only readable by root" ovpn_files_are_private
+}
+
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
@@ -269,5 +275,6 @@ if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
     scenario_firewall
     scenario_client_to_client
+    scenario_hygiene
     scenario_fresh_install
 fi
