@@ -91,6 +91,8 @@ scenario_upgrade() {
     install_snap_from_store latest/stable
     srv "$SNAP_NAME" add-client Alice >/dev/null 2>&1
     srv "$SNAP_NAME" add-client bob >/dev/null 2>&1
+    # Older versions accepted any client name.
+    srv "$SNAP_NAME" add-client "odd name" >/dev/null 2>&1
     local name
     for name in default Alice bob; do
         check "export $name.ovpn from stable" export_client "$name" "$WORK/old-$name.ovpn"
@@ -221,6 +223,22 @@ scenario_client_to_client() {
 scenario_hygiene() {
     log "Scenario 7: file permissions and input validation"
     check "client configs (with private keys) are only readable by root" ovpn_files_are_private
+
+    check_not "add-client rejects a name with a path" snapcmd add-client ../x
+    check_not "add-client rejects a name with a space" snapcmd add-client "new name"
+    check "add-client accepts a normal name" snapcmd add-client Carol.laptop-2
+    check "a client with an odd name from an older version can still be removed" \
+        snapcmd remove-client "odd name"
+    check_not "show-client of an unknown client fails" snapcmd show-client nobody
+    check_not "show-client rejects a path" snapcmd show-client ../ca
+
+    check_not "public-address with a newline is rejected" \
+        lxc exec "$SERVER" -- snap set "$SNAP_NAME" public-address=$'vpn.example.com\nscript-security 2'
+    check_not "additional-search-domains with a quote is rejected" \
+        lxc exec "$SERVER" -- snap set "$SNAP_NAME" 'additional-search-domains=x"y'
+    check "a valid public-address is accepted" lxc exec "$SERVER" -- snap set "$SNAP_NAME" public-address=vpn.example.com
+    srv snap unset "$SNAP_NAME" public-address
+    wait_for_daemons
 }
 
 # 2. A fresh install of the snap under test works, and new configs connect.

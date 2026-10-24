@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import pwd
 import random
+import re
 import socket
 import stat
 import subprocess
@@ -376,8 +377,9 @@ def get_public_addresses():
     # Prefer ipv4 addresses, since more places are ipv4-only than ipv6-only
     public_addresses.sort(key=lambda x: x.version)
     # If user manually set `public-address` setting, prefer that one.
-    if get_config("public-address"):
-        public_addresses.insert(0, get_config("public-address"))
+    public_address = get_validated_config("public-address", is_hostname_or_ip, "a hostname or IP address")
+    if public_address:
+        public_addresses.insert(0, public_address)
     # Fallback to default ip when no public are found
     if len(public_addresses) == 0:
         public_addresses.append(IPv4Address(get_default_ip()))
@@ -568,6 +570,33 @@ def get_warnings():
 #
 
 
+HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}\.?$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$")
+
+
+def is_hostname_or_ip(value):
+    '''Values like this end up in OpenVPN config files, so anything else
+    (spaces, newlines, quotes) could add options to them.
+    '''
+    try:
+        ip_address(value)
+        return True
+    except ValueError:
+        return bool(HOSTNAME_RE.fullmatch(value))
+
+
+def get_validated_config(key, validate, description):
+    '''Returns the value of a snap setting, or exits with an error when
+    `validate` rejects it. In the configure hook, that makes `snap set` fail.
+    '''
+    value = get_config(key)
+    if value and not validate(value):
+        logging.error("Invalid value for {}: {!r}. It should be {}.".format(key, value, description))
+        sys.exit(1)
+    return value
+
+
 def get_config(key):
     output = subprocess.check_output(['snapctl', 'get', key], universal_newlines=True)
     output = output.rstrip()
@@ -639,7 +668,10 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
     dns_search_domains = dns_info.get('search', [])
-    dns_search_domains += get_config("additional-search-domains").split()
+    dns_search_domains += get_validated_config(
+        "additional-search-domains",
+        lambda value: all(HOSTNAME_RE.fullmatch(domain) for domain in value.split()),
+        "a space-separated list of domain names").split()
 
     # Make sure we don't advertise the networks of our public addresses
     public_addresses = []
@@ -777,6 +809,7 @@ def show_client_config(result_dir, name):
             "Config for client {} does not appear to exist.\n"
             "You can create it by running\n"
             "\tsudo easy-openvpn-server add-client {}".format(name, name))
+        sys.exit(1)
 
 
 def get_clients(result_dir):
@@ -832,6 +865,27 @@ def create_status_files(status_dir):
 #
 
 
+CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+
+def new_client_name(ctx, param, value):
+    '''Names of new clients: used as file names and as certificate CN.
+    '''
+    if not CLIENT_NAME_RE.fullmatch(value) or value.endswith(".removed"):
+        raise click.BadParameter(
+            "use up to 64 letters, digits, '.', '-' and '_', starting with a letter or digit")
+    return value
+
+
+def existing_client_name(ctx, param, value):
+    '''Names of existing clients. Older versions accepted any name, so only
+    reject what would point outside the client-configs folder.
+    '''
+    if "/" in value or "\0" in value or value in (".", ".."):
+        raise click.BadParameter("not a valid client name")
+    return value
+
+
 @click.group()
 @click.pass_context
 def cli(ctx):
@@ -871,7 +925,7 @@ def setup(ctx):
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=new_client_name)
 def add_client(ctx, client_name):
     """Creates a new client config with given name.
     """
@@ -885,7 +939,7 @@ def add_client(ctx, client_name):
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=existing_client_name)
 def show_client(ctx, client_name):
     """Outputs the client config file in `.ovpn` format to stdout.
     """
@@ -903,7 +957,7 @@ def list_clients(ctx):
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=existing_client_name)
 def remove_client(ctx, client_name):
     """Remove the client config.
     """
