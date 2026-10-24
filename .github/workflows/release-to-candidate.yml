@@ -1,0 +1,89 @@
+name: Release
+
+# Based on the snapcrafters workflows (e.g. snapcrafters/mattermost-desktop):
+# build on Launchpad for every architecture, release to candidate, test, and
+# open a "call for testing" issue. Comment `/promote <revisions> latest/stable`
+# on that issue to release to stable (see promote-to-stable.yml).
+
+on:
+  push:
+    branches: [ "master" ]
+  # Rebuild weekly, so the snap picks up security fixes in the packages it
+  # bundles (OpenVPN, OpenSSL, Python and its dependencies).
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # push the revision tags
+  issues: write
+
+jobs:
+  release:
+    name: 🚢 Release to latest/candidate
+    runs-on: ubuntu-latest
+    environment: "Candidate Branch"
+    strategy:
+      fail-fast: false
+      matrix:
+        # snapcrafters/ci/get-architectures only reads `platforms` for core24,
+        # so keep this in sync with `platforms` in snapcraft.yaml.
+        architecture: [amd64, arm64, armhf, ppc64el, s390x, riscv64]
+    steps:
+      - name: 🚢 Release to latest/candidate
+        uses: snapcrafters/ci/release-to-candidate@main
+        with:
+          architecture: ${{ matrix.architecture }}
+          launchpad-token: ${{ secrets.LP_BUILD_SECRET }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          store-token: ${{ secrets.SNAP_STORE_CANDIDATE }}
+
+  test:
+    name: 🧪 Test latest/candidate (server on Ubuntu ${{ matrix.server-release }})
+    needs: release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26.04 has the in-kernel OpenVPN data channel (DCO), 24.04 doesn't.
+        server-release: ["24.04", "26.04"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Allow access to KVM, for the server VM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: canonical/setup-lxd@v1
+        with:
+          channel: 6/stable
+          bridges: lxdbr0,eovpn-wan,eovpn-lan
+      - name: Run the test harness
+        run: tests/harness.sh --candidate --server-release ${{ matrix.server-release }}
+
+  call-for-testing:
+    name: 📣 Create call for testing
+    needs: test
+    environment: "Candidate Branch"
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📣 Create call for testing
+        uses: snapcrafters/ci/call-for-testing@main
+        with:
+          architectures: amd64 arm64 armhf ppc64el s390x riscv64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          testing-instructions: |
+            The automated tests passed on amd64. To test on your server:
+
+            1. Upgrade to this version by running
+
+            <pre><code>sudo snap refresh {{ env.snap_name }} --channel {{ env.channel }}</code></pre>
+
+            2. Check that your existing clients can still connect, and that `sudo easy-openvpn-server.status` lists them.
+            3. Finally, add a comment below explaining whether it works, and **include the output of the following command**.
+
+            <pre><code>snap version; lscpu | grep Architecture; snap info {{ env.snap_name }} | grep installed</code></pre>
