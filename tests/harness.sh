@@ -182,6 +182,31 @@ scenario_firewall() {
     wait_for_daemons
 }
 
+# 6. Clients reaching each other: kept on upgrades (with a warning), and
+# controlled by the firewall.client-to-client setting.
+scenario_client_to_client() {
+    log "Scenario 6: client-to-client"
+    local cfg="$WORK/old-default-udp.ovpn"
+    check_client_to_client allowed "upgraded install: clients can still reach each other" "$cfg"
+    check "upgraded install: warning in status" warning_in_status
+    check "upgraded install: warning in CLI output" warning_in_cli
+    check "upgraded install: warning in the daemon log" warning_in_journal
+
+    srv snap set "$SNAP_NAME" firewall.client-to-client=false
+    wait_for_daemons
+    check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
+    check_not "client-to-client=false: no warning in status" warning_in_status
+    check_not "client-to-client=false: no warning in CLI output" warning_in_cli
+
+    # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).
+    srv snap set "$SNAP_NAME" firewall.client-to-client=true push-default-gateway=False
+    wait_for_daemons
+    check_client_to_client allowed "client-to-client=true: clients reach each other without the default gateway" "$cfg"
+    check_not "client-to-client=true: no warning in status" warning_in_status
+    srv snap set "$SNAP_NAME" push-default-gateway=True
+    wait_for_daemons
+}
+
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
@@ -213,6 +238,8 @@ scenario_fresh_install() {
         client_log eovpn-c26 >"$WORK/eovpn-c26-new-tcp.log"
     fi
     client_disconnect eovpn-c26
+    check_client_to_client blocked "fresh install: clients can't reach each other" "$WORK/new-default-udp.ovpn"
+    check_not "fresh install: no client-to-client warning" warning_in_status
 }
 
 log "Work directory: $WORK"
@@ -222,5 +249,6 @@ scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
     scenario_firewall
+    scenario_client_to_client
     scenario_fresh_install
 fi

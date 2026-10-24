@@ -311,11 +311,11 @@ udp_tun_prefix() {
 }
 
 client_has_ip() {
-    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | grep -qw "$2"
+    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | grep -w "$2" >/dev/null
 }
 
 client_has_route() {
-    lxc exec "$1" -- ip -4 route show "$2" | cat | grep -q tun0
+    lxc exec "$1" -- ip -4 route show "$2" | cat | grep tun0 >/dev/null
 }
 
 # fw_rule_count <iptables|ip6tables> <n>: true when there are exactly n of our
@@ -327,4 +327,51 @@ fw_rule_count() {
     nat="$(lxc exec "$SERVER" -- "$cmd" -t nat -S POSTROUTING | cat | grep -c 'easy-openvpn-server' || true)"
     chains="$(lxc exec "$SERVER" -- "$cmd" -S | cat | grep -c '^-N eovpn-' || true)"
     [[ "$forward" == "$n" && "$nat" == "$n" && "$chains" == "$n" ]]
+}
+
+client_tun_ip() {
+    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | awk '{print $3}'
+}
+
+# Connect eovpn-c24 and eovpn-c26 with the same config.
+connect_pair() {
+    client_connect eovpn-c24 "$1" && client_connect eovpn-c26 "$1"
+}
+
+disconnect_pair() {
+    client_disconnect eovpn-c24
+    client_disconnect eovpn-c26
+}
+
+# True when eovpn-c24 can ping eovpn-c26 over the VPN.
+pair_can_reach_each_other() {
+    local ip
+    ip="$(client_tun_ip eovpn-c26)"
+    [[ -n "$ip" ]] && lxc exec eovpn-c24 -- ping -c1 -W2 "$ip" >/dev/null 2>&1
+}
+
+# check_client_to_client <allowed|blocked> <description> <ovpn file>
+check_client_to_client() {
+    if require "eovpn-c24 and eovpn-c26 connect" connect_pair "$3"; then
+        if [[ "$1" == allowed ]]; then
+            check "$2" pair_can_reach_each_other
+        else
+            check_not "$2" pair_can_reach_each_other
+        fi
+    fi
+    disconnect_pair
+}
+
+C2C_WARNING="Clients can reach each other over the VPN"
+
+warning_in_status() {
+    lxc exec "$SERVER" -- "$SNAP_NAME.status" 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+}
+
+warning_in_cli() {
+    lxc exec "$SERVER" -- "$SNAP_NAME" list-clients 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+}
+
+warning_in_journal() {
+    lxc exec "$SERVER" -- journalctl -u "snap.$SNAP_NAME.udp-server" --no-pager 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
 }
