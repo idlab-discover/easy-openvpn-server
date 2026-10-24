@@ -18,6 +18,10 @@
 # --keep was used; the server VM is always recreated.
 set -euo pipefail
 
+# If stdin is a terminal, `lxc` goes interactive. When the harness runs in the
+# background, that stops it (SIGTTIN/SIGTTOU) and it hangs forever.
+exec </dev/null
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/lib.sh
 source "$HERE/lib.sh"
@@ -85,6 +89,17 @@ scenario_upgrade() {
     for name in default Alice bob; do
         check "export $name.ovpn from stable" export_client "$name" "$WORK/old-$name.ovpn"
     done
+    only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
+
+    # Older versions also used `client-configs/` as client-config-dir. Check
+    # that files there never had any effect, as setup.py's warning claims.
+    local bob_ip
+    bob_ip="$(udp_tun_prefix).101"
+    srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/$SNAP_NAME/current/client-configs/bob"
+    if check "eovpn-c24: bob connects to stable" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
+        check_not "stable ignores client-configs/bob" client_has_ip eovpn-c24 "$bob_ip"
+    fi
+    client_disconnect eovpn-c24
 
     if [[ -n "$UPGRADE_TO" ]]; then
         upgrade_snap "$UPGRADE_TO"
@@ -121,6 +136,28 @@ scenario_revocation() {
     check "eovpn-c24: other client bob still connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"
     client_disconnect eovpn-c24
     check_not "remove-client of an unknown client fails" snapcmd remove-client nobody
+}
+
+# 4. Client-specific config in $SNAP_COMMON/ccd is applied.
+scenario_ccd() {
+    log "Scenario 4: client-specific config"
+    local ccd="/var/snap/$SNAP_NAME/common/ccd" bob_ip
+    bob_ip="$(udp_tun_prefix).101"
+    srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
+    srv sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
+    if check "eovpn-c24: bob connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
+        check "ccd/bob gives bob its fixed address" client_has_ip eovpn-c24 "$bob_ip"
+        check_not "ccd/DEFAULT doesn't apply to bob, who has his own file" client_has_route eovpn-c24 192.0.2.0/24
+    fi
+    client_disconnect eovpn-c24
+    if check "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
+        check "ccd/DEFAULT applies to clients without their own file" client_has_route eovpn-c24 192.0.2.0/24
+    fi
+    client_disconnect eovpn-c24
+    srv rm -f "$ccd/bob" "$ccd/DEFAULT"
+    check "setup warns about files in the old client-configs folder" \
+        sh -c "lxc exec $SERVER -- $SNAP_NAME setup 2>&1 | grep -q 'client-specific config'"
+    wait_for_daemons
 }
 
 # 2. A fresh install of the snap under test works, and new configs connect.
@@ -161,5 +198,6 @@ setup_topology
 scenario_upgrade
 scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
+    scenario_ccd
     scenario_fresh_install
 fi

@@ -34,8 +34,9 @@ FAILURES=()
 
 # `lxc` doesn't print anything when its stdout isn't a pipe or a terminal in
 # some environments, so always pipe it. Callers need `set -o pipefail`.
+# The timeout makes sure a stuck LXD call fails the run instead of hanging it.
 lx() {
-    lxc "$@" | cat
+    timeout "${LX_TIMEOUT:-900}" lxc "$@" | cat
 }
 
 log() {
@@ -300,4 +301,17 @@ reaches_via_vpn() {
 # snapcmd <args>: run `easy-openvpn-server <args>` on the server, quietly.
 snapcmd() {
     lxc exec "$SERVER" -- "$SNAP_NAME" "$@" >/dev/null 2>&1
+}
+
+# The first three octets of the udp server's tunnel network, e.g. "10.12.34".
+udp_tun_prefix() {
+    lxc exec "$SERVER" -- snap get "$SNAP_NAME" internal.udp.tun-network | cat | sed 's/\.0\/24$//'
+}
+
+client_has_ip() {
+    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | grep -qw "$2"
+}
+
+client_has_route() {
+    lxc exec "$1" -- ip -4 route show "$2" | cat | grep -q tun0
 }
