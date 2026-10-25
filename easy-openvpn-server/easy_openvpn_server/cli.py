@@ -907,6 +907,9 @@ def new_client_name(ctx, param, value):
     if not CLIENT_NAME_RE.fullmatch(value) or value.endswith(".removed"):
         raise click.BadParameter(
             "use up to 64 letters, digits, '.', '-' and '_', starting with a letter or digit")
+    # ccd/DEFAULT is the config for all clients without a file of their own.
+    if value.upper() == "DEFAULT":
+        raise click.BadParameter("DEFAULT is reserved: ccd/DEFAULT is the config for all clients")
     return value
 
 

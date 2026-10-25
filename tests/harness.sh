@@ -239,6 +239,7 @@ scenario_hygiene() {
 
     check_not "add-client rejects a name with a path" snapcmd add-client ../x
     check_not "add-client rejects a name with a space" snapcmd add-client "new name"
+    check_not "add-client rejects DEFAULT, the name of the config for all clients" snapcmd add-client Default
     check "add-client accepts a normal name" snapcmd add-client Carol.laptop-2
     check "a client with an odd name from an older version can still be removed" \
         snapcmd remove-client "odd name"
