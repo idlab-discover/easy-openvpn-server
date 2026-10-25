@@ -930,7 +930,13 @@ CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 def new_client_name(ctx, param, value):
-    '''Names of new clients: used as file names and as certificate CN.
+    '''Names of new clients. A name is used in file paths and as the
+    certificate's common name (CN), which OpenVPN uses in places where odd
+    characters cause trouble: the status log separates fields with commas
+    without escaping them, and for ccd/ files OpenVPN replaces some
+    characters with '_'. Spaces and shell characters also break the
+    documented `show-client <name> > <name>.ovpn`. So only allow names that
+    work everywhere.
     '''
     if not CLIENT_NAME_RE.fullmatch(value) or value.endswith(".removed"):
         raise click.BadParameter(
@@ -939,8 +945,10 @@ def new_client_name(ctx, param, value):
 
 
 def existing_client_name(ctx, param, value):
-    '''Names of existing clients. Older versions accepted any name, so only
-    reject what would point outside the client-configs folder.
+    '''Names of existing clients. Older versions accepted any name, and
+    existing clients can't be renamed without breaking them, so only reject
+    what is actually dangerous: names that point outside the client-configs
+    folder.
     '''
     if "/" in value or "\0" in value or value in (".", ".."):
         raise click.BadParameter("not a valid client name")
