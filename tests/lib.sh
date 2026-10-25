@@ -17,6 +17,8 @@
 # the request, so tests can tell whether traffic went through the VPN (source is
 # the server's lan address because of NAT) or not.
 
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 SERVER_VM=eovpn-server-vm
 LAN_VM=eovpn-lan-vm
 CLIENT_VMS=(eovpn-client-2204-vm eovpn-client-2404-vm eovpn-client-2604-vm)
@@ -125,19 +127,7 @@ create_lan_vm() {
     retry 60 lxc exec "$LAN_VM" -- true
     lx exec "$LAN_VM" -- cloud-init status --wait >/dev/null || true
     lx exec "$LAN_VM" -- ip addr add "$METADATA_IP/32" dev lo
-    lx exec "$LAN_VM" -- sh -c 'cat > /root/whoami.py' <<'EOF'
-import http.server
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        body = self.client_address[0].encode() + b"\n"
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-http.server.ThreadingHTTPServer(("0.0.0.0", 80), Handler).serve_forever()
-EOF
+    lx file push "$TESTS_DIR/lan-vm-whoami.py" "$LAN_VM/root/whoami.py"
     lx exec "$LAN_VM" -- systemd-run --quiet --unit whoami python3 /root/whoami.py
 }
 
