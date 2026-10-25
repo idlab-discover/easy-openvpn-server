@@ -27,7 +27,22 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.x509 import load_pem_x509_certificate
 from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.x509.oid import NameOID
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "../templates")
+
+# One environment for all templates. StrictUndefined makes a variable that
+# isn't passed an error, instead of silently rendering it as empty.
+JINJA_ENV = Environment(
+    loader=FileSystemLoader(TEMPLATES_DIR),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    undefined=StrictUndefined)
+
+
+def render_template(name, **context):
+    return JINJA_ENV.get_template(name).render(**context)
 
 
 #
@@ -628,14 +643,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
         'tunnel_network_v6': str(tcp_tunnel_network_v6),
     }
-    import jinja2
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
-        trim_blocks=True,
-        lstrip_blocks=True,
-        undefined=jinja2.StrictUndefined)
-    template = j2_env.get_template('server.conf')
-    output = template.render(output=result_dir, **tcp_context)
+    output = render_template('server.conf', output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
 
@@ -647,12 +655,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
     udp_context['tunnel_network_v6'] = str(udp_tunnel_network_v6)
 
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('server.conf')
-    output = template.render(output=result_dir, **udp_context)
+    output = render_template('server.conf', output=result_dir, **udp_context)
     with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
 
@@ -694,12 +697,7 @@ def create_client_config(result_dir, name):
         'key': client_key_str,
         'tls_auth': ta_key_str,
     }
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('client.ovpn')
-    output = template.render(output=result_dir, **context)
+    output = render_template('client.ovpn', output=result_dir, **context)
     with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
         f.write(output)
 
