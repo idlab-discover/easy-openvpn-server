@@ -232,6 +232,7 @@ scenario_client_to_client() {
 # 7. Client config files and input validation.
 scenario_hygiene() {
     log "Scenario 7: file permissions and input validation"
+    check "client configs (with private keys) are only readable by root" ovpn_files_are_private
     check "private keys are only readable by root" private_keys_are_private
     check "the values run.sh sources are only writable by root" daemon_env_files_are_private
 

@@ -800,8 +800,9 @@ def create_client_config(result_dir, name):
         'tls_auth': ta_key_str,
     }
     output = render_template('client.ovpn', output=result_dir, **context)
-    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
-        f.write(output)
+    # The config contains the client's private key: only root may read it.
+    path = "{}/client-configs/{}.ovpn".format(result_dir, name)
+    write_private_file(path, output)
 
 
 def show_client_config(result_dir, name):
@@ -916,7 +917,7 @@ def add_client(ctx, client_name):
     create_client_config(ctx.obj["result_dir"], client_name)
     logging.info(
         "Added {name}. You can copy its config using\n"
-        "\tsudo easy-openvpn-server show-client {name} > {name}.ovpn".format(
+        "\t(umask 077; sudo easy-openvpn-server show-client {name} > {name}.ovpn)".format(
             name=client_name))
 
 

@@ -430,6 +430,12 @@ open(dst, "w").write(config)
 PY
 }
 
+ovpn_files_are_private() {
+    local modes
+    modes="$(lxc exec "$SERVER_VM" -- sh -c "stat -c %a /root/snap/easy-openvpn-server/current/client-configs/*.ovpn" | cat)"
+    [[ -n "$modes" ]] && ! grep -v '^600$' <<<"$modes" >/dev/null
+}
+
 # run.sh sources these files as root, so only root may write them.
 daemon_env_files_are_private() {
     local stats
