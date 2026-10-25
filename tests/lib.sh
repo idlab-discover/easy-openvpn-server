@@ -1,0 +1,327 @@
+# shellcheck shell=bash
+# Helpers for tests/harness.sh. Sourced, not executed.
+#
+# Topology:
+#
+#   eovpn-client-2204-vm, -2404-vm, -2604-vm (OpenVPN 2.5/2.6/2.7 clients)
+#          |
+#     eovpn-wan  10.250.0.0/24
+#          |
+#   eovpn-server-vm (VM, runs the snap)  wan=10.250.0.10  lan=10.251.0.10
+#          |
+#     eovpn-lan  10.251.0.0/24
+#          |
+#   eovpn-lan-vm  10.251.0.20, also answers on 169.254.169.254 (fake cloud metadata)
+#
+# The lan VM runs a tiny HTTP server that answers with the source address of
+# the request, so tests can tell whether traffic went through the VPN (source is
+# the server's lan address because of NAT) or not.
+
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SERVER_VM=eovpn-server-vm
+LAN_VM=eovpn-lan-vm
+CLIENT_VMS=(eovpn-client-2204-vm eovpn-client-2404-vm eovpn-client-2604-vm)
+WAN_NET=eovpn-wan
+LAN_NET=eovpn-lan
+SERVER_WAN_IP=10.250.0.10
+SERVER_LAN_IP=10.251.0.10
+LAN_VM_IP=10.251.0.20
+METADATA_IP=169.254.169.254
+SERVER_RELEASE="${SERVER_RELEASE:-24.04}"
+
+PASSED=0
+FAILED=0
+FAILURES=()
+
+# `lxc` doesn't print anything when its stdout isn't a pipe or a terminal in
+# some environments, so always pipe it. Callers need `set -o pipefail`.
+# The timeout makes sure a stuck LXD call fails the run instead of hanging it.
+lx() {
+    timeout "${LX_TIMEOUT:-900}" lxc "$@" | cat
+}
+
+log() {
+    printf '\033[1m==> %s\033[0m\n' "$*" >&2
+}
+
+pass() {
+    PASSED=$((PASSED + 1))
+    printf '\033[32mPASS\033[0m %s\n' "$*" >&2
+}
+
+fail() {
+    FAILED=$((FAILED + 1))
+    FAILURES+=("$*")
+    printf '\033[31mFAIL\033[0m %s\n' "$*" >&2
+}
+
+# check "description" command...: PASS if the command succeeds. Always
+# returns 0, so a failure doesn't abort the harness (`set -e`).
+check() {
+    require "$@" || true
+}
+
+# check_not "description" command...: PASS if the command fails.
+check_not() {
+    local desc="$1"
+    shift
+    if "$@"; then fail "$desc"; else pass "$desc"; fi
+}
+
+# require "description" command...: like check, but returns whether it
+# passed. Only use it as a condition (`if require ...`), to skip checks that
+# depend on it.
+require() {
+    local desc="$1"
+    shift
+    if "$@"; then
+        pass "$desc"
+    else
+        fail "$desc"
+        return 1
+    fi
+}
+
+# retry <seconds> command...: retry once per second until it succeeds.
+retry() {
+    local timeout="$1"
+    shift
+    local i
+    for ((i = 0; i < timeout; i++)); do
+        if "$@" >/dev/null 2>&1; then return 0; fi
+        sleep 1
+    done
+    return 1
+}
+
+server_vm_exec() {
+    lx exec "$SERVER_VM" -- "$@"
+}
+
+vm_exists() {
+    lxc info "$1" >/dev/null 2>&1
+}
+
+#
+# Topology
+#
+
+create_networks() {
+    if ! lxc network show "$WAN_NET" >/dev/null 2>&1; then
+        log "Creating network $WAN_NET"
+        lx network create "$WAN_NET" ipv4.address=10.250.0.1/24 ipv4.nat=true ipv6.address=none
+    fi
+    if ! lxc network show "$LAN_NET" >/dev/null 2>&1; then
+        log "Creating network $LAN_NET"
+        lx network create "$LAN_NET" ipv4.address=10.251.0.1/24 ipv4.nat=false ipv6.address=none
+    fi
+}
+
+create_lan_vm() {
+    if vm_exists "$LAN_VM"; then return; fi
+    log "Creating $LAN_VM"
+    lx init ubuntu:24.04 "$LAN_VM" -n "$LAN_NET" -q
+    lx config device set "$LAN_VM" eth0 ipv4.address="$LAN_VM_IP"
+    lx start "$LAN_VM"
+    retry 60 lxc exec "$LAN_VM" -- true
+    lx exec "$LAN_VM" -- cloud-init status --wait >/dev/null || true
+    lx exec "$LAN_VM" -- ip addr add "$METADATA_IP/32" dev lo
+    lx file push "$TESTS_DIR/lan-vm-whoami.py" "$LAN_VM/root/whoami.py"
+    lx exec "$LAN_VM" -- systemd-run --quiet --unit whoami python3 /root/whoami.py
+}
+
+create_client_vm() {
+    local name="$1" release
+    if vm_exists "$name"; then return; fi
+    case "$name" in
+        *2204-vm) release=22.04 ;;
+        *2404-vm) release=24.04 ;;
+        *2604-vm) release=26.04 ;;
+    esac
+    log "Creating $name (Ubuntu $release)"
+    lx launch "ubuntu:$release" "$name" -n "$WAN_NET" -q
+    lx config device add "$name" tun unix-char path=/dev/net/tun >/dev/null
+    retry 60 lxc exec "$name" -- true
+    lx exec "$name" -- cloud-init status --wait >/dev/null || true
+    lx exec "$name" -- sh -c 'apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -yq openvpn curl' >/dev/null
+    log "$name: $(lx exec "$name" -- openvpn --version | head -1)"
+}
+
+create_server_vm() {
+    if vm_exists "$SERVER_VM"; then
+        log "Deleting old $SERVER_VM"
+        lx delete -f "$SERVER_VM"
+    fi
+    log "Creating $SERVER_VM (VM, Ubuntu $SERVER_RELEASE)"
+    lx init "ubuntu:$SERVER_RELEASE" "$SERVER_VM" --vm -n "$WAN_NET" -q -c limits.cpu=2 -c limits.memory=2GiB
+    lx config device set "$SERVER_VM" eth0 ipv4.address="$SERVER_WAN_IP" hwaddr=00:16:3e:e0:00:10
+    lx config device add "$SERVER_VM" eth1 nic network="$LAN_NET" ipv4.address="$SERVER_LAN_IP" \
+        hwaddr=00:16:3e:e0:01:10 >/dev/null
+    lxc config set "$SERVER_VM" cloud-init.network-config - <<'EOF'
+version: 2
+ethernets:
+  wan:
+    match: {macaddress: "00:16:3e:e0:00:10"}
+    dhcp4: true
+  lan:
+    match: {macaddress: "00:16:3e:e0:01:10"}
+    dhcp4: true
+    dhcp4-overrides: {use-routes: false, use-dns: false}
+EOF
+    lx start "$SERVER_VM"
+    if ! retry 180 lxc exec "$SERVER_VM" -- true; then
+        echo "Server VM agent didn't come up" >&2
+        return 1
+    fi
+    server_vm_exec cloud-init status --wait >/dev/null || true
+    # Pretend the lan VM is the cloud metadata service.
+    server_vm_exec ip route add "$METADATA_IP/32" via "$LAN_VM_IP"
+    retry 120 lxc exec "$SERVER_VM" -- snap wait system seed.loaded
+}
+
+setup_topology() {
+    create_networks
+    create_lan_vm
+    local c
+    for c in "${CLIENT_VMS[@]}"; do create_client_vm "$c"; done
+    create_server_vm
+}
+
+teardown() {
+    log "Cleaning up"
+    local i
+    for i in "$SERVER_VM" "$LAN_VM" "${CLIENT_VMS[@]}"; do
+        if vm_exists "$i"; then lx delete -f "$i"; fi
+    done
+    lxc network delete "$WAN_NET" >/dev/null 2>&1 || true
+    lxc network delete "$LAN_NET" >/dev/null 2>&1 || true
+}
+
+#
+# Snap on the server
+#
+
+# Wait until both OpenVPN daemons listen on their ports.
+wait_for_daemons() {
+    retry 120 sh -c "lxc exec $SERVER_VM -- ss -Hlun 'sport = :1194' | grep -q ." &&
+        retry 60 sh -c "lxc exec $SERVER_VM -- ss -Hltn 'sport = :443' | grep -q ."
+}
+
+# True when both interfaces the daemons need are connected.
+interfaces_connected() {
+    local connections
+    connections="$(lxc exec "$SERVER_VM" -- snap connections easy-openvpn-server | cat)"
+    grep -E '^network-control +easy-openvpn-server:network-control +:network-control' <<<"$connections" >/dev/null &&
+        grep -E '^firewall-control +easy-openvpn-server:firewall-control +:firewall-control' <<<"$connections" >/dev/null
+}
+
+connect_interfaces() {
+    server_vm_exec snap connect easy-openvpn-server:network-control
+    server_vm_exec snap connect easy-openvpn-server:firewall-control
+}
+
+# The store auto-connects the interfaces for this snap. Check that, and only
+# connect them when it didn't, so the other scenarios can still run.
+check_store_auto_connects_interfaces() {
+    if ! require "$1: the store auto-connects network-control and firewall-control" interfaces_connected; then
+        connect_interfaces
+    fi
+}
+
+install_snap_from_store() {
+    local channel="$1"
+    log "Installing easy-openvpn-server from $channel"
+    server_vm_exec snap install easy-openvpn-server --channel="$channel" >/dev/null
+    check_store_auto_connects_interfaces "install from $channel"
+    wait_for_daemons
+}
+
+# Upgrade to either a local .snap file or a store channel.
+upgrade_snap() {
+    local target="$1"
+    if [[ -f "$target" ]]; then
+        log "Upgrading to $target"
+        lx file push "$target" "$SERVER_VM/root/under-test.snap"
+        server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
+        # Auto-connect doesn't apply to local snaps.
+        connect_interfaces
+    else
+        log "Upgrading to channel $target"
+        server_vm_exec snap refresh easy-openvpn-server --channel="$target" >/dev/null
+        check_store_auto_connects_interfaces "upgrade to $target"
+    fi
+    server_vm_exec snap restart easy-openvpn-server >/dev/null
+    wait_for_daemons
+}
+
+# export_client_config <name> <file>: write the client's .ovpn to a local file.
+export_client_config() {
+    lxc exec "$SERVER_VM" -- easy-openvpn-server show-client "$1" 2>/dev/null | cat >"$2"
+    grep -q '^client' "$2"
+}
+
+# Keep only the remote lines for one protocol, so we can test udp and tcp separately.
+only_proto() {
+    local proto="$1" in="$2" out="$3"
+    if [[ "$proto" == udp ]]; then
+        grep -v '^\s*remote .* tcp$' "$in" >"$out"
+    else
+        grep -v '^\s*remote .* udp$' "$in" >"$out"
+    fi
+}
+
+#
+# OpenVPN clients
+#
+
+# client_vpn_connect <client-vm> <ovpn file>: start OpenVPN and wait until the
+# tunnel is up. Returns non-zero if it doesn't come up within 30 seconds.
+client_vpn_connect() {
+    local c="$1" cfg="$2"
+    client_vpn_disconnect "$c"
+    lx file push "$cfg" "$c/root/test.ovpn"
+    lx exec "$c" -- rm -f /root/test.log
+    # `--mute 0` overrides `mute 20` in the config, which otherwise can hide
+    # the "Initialization Sequence Completed" line we wait for.
+    # `--disable-dco`: unprivileged containers can't use the kernel data
+    # channel (DCO). Without compression, 2.6+ clients would try to. 2.5
+    # doesn't have DCO, or the option.
+    local extra=() help
+    # `openvpn --help` exits non-zero, so don't use it in a pipeline condition.
+    help="$(lxc exec "$c" -- openvpn --help 2>&1 | cat || true)"
+    if [[ "$help" == *--disable-dco* ]]; then
+        extra=(--disable-dco)
+    fi
+    lx exec "$c" -- openvpn --config /root/test.ovpn --mute 0 "${extra[@]}" --daemon --log /root/test.log \
+        --writepid /root/test.pid >/dev/null 2>&1
+    retry 30 lxc exec "$c" -- grep -q "Initialization Sequence Completed" /root/test.log
+}
+
+client_vpn_disconnect() {
+    local c="$1"
+    lxc exec "$c" -- sh -c 'pkill -x openvpn; while pgrep -x openvpn >/dev/null; do sleep 0.2; done' \
+        >/dev/null 2>&1 || true
+}
+
+client_vpn_log() {
+    lxc exec "$1" -- cat /root/test.log 2>/dev/null | cat || true
+}
+
+# get_source_ip_seen_by_lan_vm <client-vm> <ip>: send an HTTP request from a
+# client VM to the lan VM and print the source address the lan VM saw. If the
+# request went through the VPN, that's the server's lan address (NAT); if it
+# didn't, it's the client VM's own address.
+get_source_ip_seen_by_lan_vm() {
+    lxc exec "$1" -- curl -sS -m 5 "http://$2/" 2>/dev/null | cat
+}
+
+# True when the request reached the lan VM through the VPN (NATed behind the server).
+client_reaches_lan_vm_via_vpn() {
+    [[ "$(get_source_ip_seen_by_lan_vm "$1" "$2")" == "$SERVER_LAN_IP" ]]
+}
+
+# snapcmd <args>: run `easy-openvpn-server <args>` on the server, quietly.
+snapcmd() {
+    lxc exec "$SERVER_VM" -- easy-openvpn-server "$@" >/dev/null 2>&1
+}
