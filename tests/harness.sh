@@ -64,7 +64,7 @@ WORK="$(mktemp -d -t eovpn-harness.XXXXXX)"
 finish() {
     local rc=$?
     if [[ $FAILED -gt 0 || $rc -ne 0 ]] && vm_exists "$SERVER_VM"; then
-        lxc exec "$SERVER_VM" -- journalctl -u "snap.$SNAP_NAME.*" --no-pager 2>/dev/null |
+        lxc exec "$SERVER_VM" -- journalctl -u "snap.easy-openvpn-server.*" --no-pager 2>/dev/null |
             cat >"$WORK/server-journal.log" || true
         echo "Server journal saved to $WORK/server-journal.log" >&2
     fi
@@ -89,10 +89,10 @@ trap finish EXIT
 scenario_upgrade() {
     log "Scenario 1: upgrade"
     install_snap_from_store latest/stable
-    server_vm_exec "$SNAP_NAME" add-client Alice >/dev/null 2>&1
-    server_vm_exec "$SNAP_NAME" add-client bob >/dev/null 2>&1
+    server_vm_exec easy-openvpn-server add-client Alice >/dev/null 2>&1
+    server_vm_exec easy-openvpn-server add-client bob >/dev/null 2>&1
     # Older versions accepted any client name.
-    server_vm_exec "$SNAP_NAME" add-client "odd name" >/dev/null 2>&1
+    server_vm_exec easy-openvpn-server add-client "odd name" >/dev/null 2>&1
     local name
     for name in default Alice bob; do
         check "export $name.ovpn from stable" export_client_config "$name" "$WORK/old-$name.ovpn"
@@ -103,7 +103,7 @@ scenario_upgrade() {
     # that files there never had any effect, as setup.py's warning claims.
     local bob_ip
     bob_ip="$(udp_tun_prefix).101"
-    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/$SNAP_NAME/current/client-configs/bob"
+    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/easy-openvpn-server/current/client-configs/bob"
     if require "eovpn-client-2404-vm: bob connects to stable" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"; then
         check_not "stable ignores client-configs/bob" client_vpn_has_ip eovpn-client-2404-vm "$bob_ip"
     fi
@@ -153,7 +153,7 @@ scenario_revocation() {
 # 4. Client-specific config in $SNAP_COMMON/ccd is applied.
 scenario_ccd() {
     log "Scenario 4: client-specific config"
-    local ccd="/var/snap/$SNAP_NAME/common/ccd" bob_ip
+    local ccd="/var/snap/easy-openvpn-server/common/ccd" bob_ip
     bob_ip="$(udp_tun_prefix).101"
     server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
     server_vm_exec sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
@@ -168,7 +168,7 @@ scenario_ccd() {
     client_vpn_disconnect eovpn-client-2404-vm
     server_vm_exec rm -f "$ccd/bob" "$ccd/DEFAULT"
     check "setup warns about files in the old client-configs folder" \
-        sh -c "lxc exec $SERVER_VM -- $SNAP_NAME setup 2>&1 | grep -q 'client-specific config'"
+        sh -c "lxc exec $SERVER_VM -- easy-openvpn-server setup 2>&1 | grep -q 'client-specific config'"
     wait_for_daemons
 }
 
@@ -183,14 +183,14 @@ scenario_firewall() {
     check "DNS servers pushed to clients are exempt from the blocks" \
         sh -c "lxc exec $SERVER_VM -- iptables -S eovpn-udp-server | grep -q -- '--dport 53 -j RETURN'"
 
-    server_vm_exec snap restart "$SNAP_NAME" >/dev/null
+    server_vm_exec snap restart easy-openvpn-server >/dev/null
     wait_for_daemons
     check "no duplicate rules after a restart (iptables)" fw_rule_count iptables 2
     check "no duplicate rules after a restart (ip6tables)" fw_rule_count ip6tables 2
-    server_vm_exec snap stop "$SNAP_NAME" >/dev/null
+    server_vm_exec snap stop easy-openvpn-server >/dev/null
     check "no rules left after stopping (iptables)" fw_rule_count iptables 0
     check "no rules left after stopping (ip6tables)" fw_rule_count ip6tables 0
-    server_vm_exec snap start "$SNAP_NAME" >/dev/null
+    server_vm_exec snap start easy-openvpn-server >/dev/null
     wait_for_daemons
 }
 
@@ -204,18 +204,18 @@ scenario_client_to_client() {
     check "upgraded install: warning in CLI output" warning_in_cli
     check "upgraded install: warning in the daemon log" warning_in_journal
 
-    server_vm_exec snap set "$SNAP_NAME" firewall.client-to-client=false
+    server_vm_exec snap set easy-openvpn-server firewall.client-to-client=false
     wait_for_daemons
     check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
     check_not "client-to-client=false: no warning in status" warning_in_status
     check_not "client-to-client=false: no warning in CLI output" warning_in_cli
 
     # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).
-    server_vm_exec snap set "$SNAP_NAME" firewall.client-to-client=true push-default-gateway=False
+    server_vm_exec snap set easy-openvpn-server firewall.client-to-client=true push-default-gateway=False
     wait_for_daemons
     check_client_to_client allowed "client-to-client=true: clients reach each other without the default gateway" "$cfg"
     check_not "client-to-client=true: no warning in status" warning_in_status
-    server_vm_exec snap set "$SNAP_NAME" push-default-gateway=True
+    server_vm_exec snap set easy-openvpn-server push-default-gateway=True
     wait_for_daemons
 }
 
@@ -233,11 +233,11 @@ scenario_hygiene() {
     check_not "show-client rejects a path" snapcmd show-client ../ca
 
     check_not "public-address with a newline is rejected" \
-        lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" public-address=$'vpn.example.com\nscript-security 2'
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=$'vpn.example.com\nscript-security 2'
     check_not "additional-search-domains with a quote is rejected" \
-        lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" 'additional-search-domains=x"y'
-    check "a valid public-address is accepted" lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" public-address=vpn.example.com
-    server_vm_exec snap unset "$SNAP_NAME" public-address
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server 'additional-search-domains=x"y'
+    check "a valid public-address is accepted" lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=vpn.example.com
+    server_vm_exec snap unset easy-openvpn-server public-address
     wait_for_daemons
 }
 
@@ -283,12 +283,12 @@ scenario_dns() {
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
-    server_vm_exec snap remove --purge "$SNAP_NAME" >/dev/null
+    server_vm_exec snap remove --purge easy-openvpn-server >/dev/null
     if [[ -f "$UPGRADE_TO" ]]; then
         lx file push "$UPGRADE_TO" "$SERVER_VM/root/under-test.snap"
         server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
-        server_vm_exec snap connect "$SNAP_NAME:network-control"
-        server_vm_exec snap connect "$SNAP_NAME:firewall-control"
+        server_vm_exec snap connect "easy-openvpn-server:network-control"
+        server_vm_exec snap connect "easy-openvpn-server:firewall-control"
         wait_for_daemons
     else
         install_snap_from_store "$UPGRADE_TO"

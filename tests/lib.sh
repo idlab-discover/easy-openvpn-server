@@ -26,7 +26,6 @@ SERVER_WAN_IP=10.250.0.10
 SERVER_LAN_IP=10.251.0.10
 LAN_VM_IP=10.251.0.20
 METADATA_IP=169.254.169.254
-SNAP_NAME=easy-openvpn-server
 SERVER_RELEASE="${SERVER_RELEASE:-24.04}"
 
 PASSED=0
@@ -221,10 +220,10 @@ wait_for_daemons() {
 
 install_snap_from_store() {
     local channel="$1"
-    log "Installing $SNAP_NAME from $channel"
-    server_vm_exec snap install "$SNAP_NAME" --channel="$channel" >/dev/null
-    server_vm_exec snap connect "$SNAP_NAME:network-control"
-    server_vm_exec snap connect "$SNAP_NAME:firewall-control"
+    log "Installing easy-openvpn-server from $channel"
+    server_vm_exec snap install easy-openvpn-server --channel="$channel" >/dev/null
+    server_vm_exec snap connect "easy-openvpn-server:network-control"
+    server_vm_exec snap connect "easy-openvpn-server:firewall-control"
     wait_for_daemons
 }
 
@@ -237,18 +236,18 @@ upgrade_snap() {
         server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
     else
         log "Upgrading to channel $target"
-        server_vm_exec snap refresh "$SNAP_NAME" --channel="$target" >/dev/null
+        server_vm_exec snap refresh easy-openvpn-server --channel="$target" >/dev/null
     fi
     # Interfaces stay connected on upgrade, but be explicit.
-    server_vm_exec snap connect "$SNAP_NAME:network-control"
-    server_vm_exec snap connect "$SNAP_NAME:firewall-control"
-    server_vm_exec snap restart "$SNAP_NAME" >/dev/null
+    server_vm_exec snap connect "easy-openvpn-server:network-control"
+    server_vm_exec snap connect "easy-openvpn-server:firewall-control"
+    server_vm_exec snap restart easy-openvpn-server >/dev/null
     wait_for_daemons
 }
 
 # export_client_config <name> <file>: write the client's .ovpn to a local file.
 export_client_config() {
-    lxc exec "$SERVER_VM" -- "$SNAP_NAME" show-client "$1" 2>/dev/null | cat >"$2"
+    lxc exec "$SERVER_VM" -- easy-openvpn-server show-client "$1" 2>/dev/null | cat >"$2"
     grep -q '^client' "$2"
 }
 
@@ -314,12 +313,12 @@ client_reaches_lan_vm_via_vpn() {
 
 # snapcmd <args>: run `easy-openvpn-server <args>` on the server, quietly.
 snapcmd() {
-    lxc exec "$SERVER_VM" -- "$SNAP_NAME" "$@" >/dev/null 2>&1
+    lxc exec "$SERVER_VM" -- easy-openvpn-server "$@" >/dev/null 2>&1
 }
 
 # The first three octets of the udp server's tunnel network, e.g. "10.12.34".
 udp_tun_prefix() {
-    lxc exec "$SERVER_VM" -- snap get "$SNAP_NAME" internal.udp.tun-network | cat | sed 's/\.0\/24$//'
+    lxc exec "$SERVER_VM" -- snap get easy-openvpn-server internal.udp.tun-network | cat | sed 's/\.0\/24$//'
 }
 
 client_vpn_has_ip() {
@@ -377,15 +376,15 @@ check_client_to_client() {
 C2C_WARNING="Clients can reach each other over the VPN"
 
 warning_in_status() {
-    lxc exec "$SERVER_VM" -- "$SNAP_NAME.status" 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+    lxc exec "$SERVER_VM" -- "easy-openvpn-server.status" 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
 }
 
 warning_in_cli() {
-    lxc exec "$SERVER_VM" -- "$SNAP_NAME" list-clients 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+    lxc exec "$SERVER_VM" -- easy-openvpn-server list-clients 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
 }
 
 warning_in_journal() {
-    lxc exec "$SERVER_VM" -- journalctl -u "snap.$SNAP_NAME.udp-server" --no-pager 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+    lxc exec "$SERVER_VM" -- journalctl -u "snap.easy-openvpn-server.udp-server" --no-pager 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
 }
 
 # True when the client's data channel compresses: it says so (2.6+), or the
@@ -414,7 +413,7 @@ client_vpn_got_pushed() {
 # with_server_cert <in.ovpn> <out.ovpn>: replace the client's cert and key
 # with the server's, to check the server rejects non-client certificates.
 with_server_cert() {
-    local dir="/root/snap/$SNAP_NAME/current"
+    local dir="/root/snap/easy-openvpn-server/current"
     python3 -I - "$1" "$2" \
         "$(lxc exec "$SERVER_VM" -- cat "$dir/server.crt" | cat)" \
         "$(lxc exec "$SERVER_VM" -- cat "$dir/server.key" | cat)" <<'PY'
@@ -429,7 +428,7 @@ PY
 
 ovpn_files_are_private() {
     local modes
-    modes="$(lxc exec "$SERVER_VM" -- sh -c "stat -c %a /root/snap/$SNAP_NAME/current/client-configs/*.ovpn" | cat)"
+    modes="$(lxc exec "$SERVER_VM" -- sh -c "stat -c %a /root/snap/easy-openvpn-server/current/client-configs/*.ovpn" | cat)"
     [[ -n "$modes" ]] && ! grep -v '^600$' <<<"$modes" >/dev/null
 }
 
