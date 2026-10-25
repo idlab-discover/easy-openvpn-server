@@ -64,7 +64,7 @@ do
 done < "$CONFIG_FILE"
 echo "dns servers: ${DNS_SERVERS[*]}"
 
-# Settings and warnings that the CLI (cli.py) put in the config.
+# Settings that the CLI (cli.py) put in the config.
 CLIENT_TO_CLIENT=block
 regex='^# easy-openvpn-server: client-to-client=(.*)'
 while IFS= read -r line
@@ -72,9 +72,6 @@ do
     if [[ "$line" =~ $regex ]]
     then
         CLIENT_TO_CLIENT="${BASH_REMATCH[1]}"
-    elif [[ "$line" == "# WARNING: "* ]]
-    then
-        echo "${line#\# }" >&2
     fi
 done < "$CONFIG_FILE"
 echo "client-to-client: ${CLIENT_TO_CLIENT}"

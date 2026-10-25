@@ -587,7 +587,7 @@ def get_client_to_client():
 
 
 def get_warnings():
-    '''Warnings shown by every command, by `status` and in the daemon logs.
+    '''Warnings shown by every `easy-openvpn-server` command.
     '''
     warnings = []
     if get_client_to_client() == "allow-legacy":
@@ -753,7 +753,6 @@ def create_server_config(result_dir, status_dir, daemon_dir):
         # the default gateway.
         'all_tunnel_networks': [tcp_tunnel_network, udp_tunnel_network],
         'all_tunnel_networks_v6': [tcp_tunnel_network_v6, udp_tunnel_network_v6],
-        'warnings': get_warnings(),
     }
     import jinja2
     j2_env = Environment(

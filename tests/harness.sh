@@ -212,21 +212,18 @@ scenario_client_to_client() {
     log "Scenario 6: client-to-client"
     local cfg="$WORK/old-default-udp.ovpn"
     check_client_to_client allowed "upgraded install: clients can still reach each other" "$cfg"
-    check "upgraded install: warning in status" warning_in_status
     check "upgraded install: warning in CLI output" warning_in_cli
-    check "upgraded install: warning in the daemon log" warning_in_journal
 
     server_vm_exec snap set easy-openvpn-server firewall.client-to-client=false
     wait_for_daemons
     check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
-    check_not "client-to-client=false: no warning in status" warning_in_status
     check_not "client-to-client=false: no warning in CLI output" warning_in_cli
 
     # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).
     server_vm_exec snap set easy-openvpn-server firewall.client-to-client=true push-default-gateway=False
     wait_for_daemons
     check_client_to_client allowed "client-to-client=true: clients reach each other without the default gateway" "$cfg"
-    check_not "client-to-client=true: no warning in status" warning_in_status
+    check_not "client-to-client=true: no warning in CLI output" warning_in_cli
     server_vm_exec snap set easy-openvpn-server push-default-gateway=True
     wait_for_daemons
 }
@@ -333,7 +330,7 @@ scenario_fresh_install() {
             client_vpn_connect eovpn-client-2404-vm "$WORK/server-cert-udp.ovpn"
         client_vpn_disconnect eovpn-client-2404-vm
     fi
-    check_not "fresh install: no client-to-client warning" warning_in_status
+    check_not "fresh install: no client-to-client warning" warning_in_cli
 }
 
 log "Work directory: $WORK"

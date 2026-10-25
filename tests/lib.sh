@@ -385,17 +385,11 @@ check_client_to_client() {
 
 C2C_WARNING="Clients can reach each other over the VPN"
 
-warning_in_status() {
-    lxc exec "$SERVER_VM" -- "easy-openvpn-server.status" 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
-}
 
 warning_in_cli() {
     lxc exec "$SERVER_VM" -- easy-openvpn-server list-clients 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
 }
 
-warning_in_journal() {
-    lxc exec "$SERVER_VM" -- journalctl -u "snap.easy-openvpn-server.udp-server" --no-pager 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
-}
 
 # True when the client's data channel compresses: it says so (2.6+), or the
 # server pushed it compression options.
