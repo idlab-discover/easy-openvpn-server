@@ -63,15 +63,12 @@ def create_RSA_keypair(path):
         key_size=4096,
         backend=default_backend()
     )
-    # Write the key to disk for safe keeping
-    with open(path, "wb") as f:
-        f.write(keypair.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        ))
-    # Make sure other users can't read the private key
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    # Write the key to disk for safe keeping. Only root may read it.
+    write_private_file(path, keypair.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
     return keypair
 
 

@@ -480,3 +480,10 @@ daemon_env_files_are_private() {
     stats="$(lxc exec "$SERVER_VM" -- sh -c "stat -c '%a %U' /root/snap/easy-openvpn-server/current/*-server.env" | cat)"
     [[ "$(wc -l <<<"$stats")" == 2 ]] && ! grep -v '^600 root$' <<<"$stats" >/dev/null
 }
+
+# The CA, server and client keys.
+private_keys_are_private() {
+    local modes
+    modes="$(lxc exec "$SERVER_VM" -- sh -c "cd /root/snap/easy-openvpn-server/current && stat -c %a ca.key server.key client-configs/*.key" | cat)"
+    [[ "$(wc -l <<<"$modes")" -ge 3 ]] && ! grep -v '^600$' <<<"$modes" >/dev/null
+}
