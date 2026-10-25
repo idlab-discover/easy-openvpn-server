@@ -9,6 +9,7 @@ from pathlib import Path
 import pwd
 import random
 import re
+import shlex
 import socket
 import stat
 import subprocess
@@ -764,6 +765,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     output = template.render(output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/tcp-server.env'.format(result_dir), tcp_tunnel_network, tcp_context)
 
     udp_context = tcp_context
     udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
@@ -781,6 +783,23 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     output = template.render(output=result_dir, **udp_context)
     with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/udp-server.env'.format(result_dir), udp_tunnel_network, udp_context)
+
+
+def write_daemon_env(path, tunnel_network, context):
+    '''Writes the values run.sh needs for one daemon. run.sh sources this
+    file, so only root may write it, and every value is shell-quoted.
+    '''
+    import jinja2
+    j2_env = Environment(
+        loader=FileSystemLoader(TEMPLATES_DIR),
+        undefined=jinja2.StrictUndefined)
+    j2_env.filters['shell_quote'] = shlex.quote
+    output = j2_env.get_template('server.env').render(
+        tunnel_network_cidr=str(tunnel_network), **context)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+        f.write(output)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
 def create_client_config_dir(daemon_dir):

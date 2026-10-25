@@ -473,3 +473,10 @@ s.sendto(query, (sys.argv[1], 53))
 sys.exit(0 if s.recv(512)[:2] == b"\x12\x34" else 1)
 ' "$2" >/dev/null 2>&1
 }
+
+# run.sh sources these files as root, so only root may write them.
+daemon_env_files_are_private() {
+    local stats
+    stats="$(lxc exec "$SERVER_VM" -- sh -c "stat -c '%a %U' /root/snap/easy-openvpn-server/current/*-server.env" | cat)"
+    [[ "$(wc -l <<<"$stats")" == 2 ]] && ! grep -v '^600 root$' <<<"$stats" >/dev/null
+}

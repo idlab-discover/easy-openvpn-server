@@ -28,52 +28,18 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     sleep infinity
 fi    
 
-regex="^server\s+(.*)\s+(.*)"
-while IFS= read -r line
-do
-    # echo $line
-    if [[ "$line" =~ $regex ]]
-    then
-        TUNNEL_ADDRESS="${BASH_REMATCH[1]}"
-        TUNNEL_NETMASK="${BASH_REMATCH[2]}"
-        echo "ip ${TUNNEL_ADDRESS}"
-        echo "nm ${TUNNEL_NETMASK}"
-    fi
-done < "$CONFIG_FILE"
-
-regex="^server-ipv6\s+(.*)\s*"
-while IFS= read -r line
-do
-    # echo $line
-    if [[ "$line" =~ $regex ]]
-    then
-        TUNNEL_NETWORK_6="${BASH_REMATCH[1]}"
-        echo "ipv6 network: ${TUNNEL_NETWORK_6}"
-    fi
-done < "$CONFIG_FILE"
-
-# DNS servers we push to clients.
-DNS_SERVERS=()
-regex='^\s*push "dhcp-option DNS6? ([^"]+)"'
-while IFS= read -r line
-do
-    if [[ "$line" =~ $regex ]]
-    then
-        DNS_SERVERS+=("${BASH_REMATCH[1]}")
-    fi
-done < "$CONFIG_FILE"
+# Values the CLI (cli.py) wrote for this daemon: TUNNEL_NETWORK,
+# TUNNEL_NETWORK_6, DNS_SERVERS (the nameservers pushed to clients) and
+# CLIENT_TO_CLIENT. Only root can write this file.
+ENV_FILE="${CONFIG_FILE%.conf}.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Error: please generate config"
+    sleep infinity
+fi
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+echo "tunnel networks: ${TUNNEL_NETWORK} ${TUNNEL_NETWORK_6}"
 echo "dns servers: ${DNS_SERVERS[*]}"
-
-# Settings that the CLI (cli.py) put in the config.
-CLIENT_TO_CLIENT=block
-regex='^# easy-openvpn-server: client-to-client=(.*)'
-while IFS= read -r line
-do
-    if [[ "$line" =~ $regex ]]
-    then
-        CLIENT_TO_CLIENT="${BASH_REMATCH[1]}"
-    fi
-done < "$CONFIG_FILE"
 echo "client-to-client: ${CLIENT_TO_CLIENT}"
 
 # Stage packages don't get the `iptables` command that update-alternatives
@@ -156,9 +122,9 @@ remove_chain() {
 function cleanup {
   echo Cleaning up...
   #sysctl -w net.ipv4.ip_forward=${ORIG_FORWARD_VALUE}
-  remove_rule "$IPTABLES" -t nat -A POSTROUTING -s "$TUNNEL_ADDRESS/$TUNNEL_NETMASK" -j MASQUERADE
+  remove_rule "$IPTABLES" -t nat -A POSTROUTING -s "$TUNNEL_NETWORK" -j MASQUERADE
   remove_rule "$IP6TABLES" -t nat -A POSTROUTING -s "$TUNNEL_NETWORK_6" -j MASQUERADE
-  remove_chain "$IPTABLES" "$TUNNEL_ADDRESS/$TUNNEL_NETMASK"
+  remove_chain "$IPTABLES" "$TUNNEL_NETWORK"
   remove_chain "$IP6TABLES" "$TUNNEL_NETWORK_6"
 }
 # Set the trap before adding any rules, so a stop during startup doesn't
@@ -166,10 +132,10 @@ function cleanup {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-add_rule "$IPTABLES" -t nat -A POSTROUTING -s "$TUNNEL_ADDRESS/$TUNNEL_NETMASK" -j MASQUERADE
+add_rule "$IPTABLES" -t nat -A POSTROUTING -s "$TUNNEL_NETWORK" -j MASQUERADE
 # Note: see ipv6.md for more info on why we're using MASQUERADE NAT.
 add_rule "$IP6TABLES" -t nat -A POSTROUTING -s "$TUNNEL_NETWORK_6" -j MASQUERADE
-setup_chain "$IPTABLES" "$TUNNEL_ADDRESS/$TUNNEL_NETMASK" "${BLOCKED_V4[@]}"
+setup_chain "$IPTABLES" "$TUNNEL_NETWORK" "${BLOCKED_V4[@]}"
 setup_chain "$IP6TABLES" "$TUNNEL_NETWORK_6" "${BLOCKED_V6[@]}"
 
 ORIG_FORWARD_VALUE=$(sysctl net.ipv4.ip_forward -b)
