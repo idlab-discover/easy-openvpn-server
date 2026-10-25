@@ -11,6 +11,8 @@
 #   --channel CHANNEL  upgrade to this store channel
 #   --candidate        same as --channel latest/candidate
 #   --keep             don't delete the LXD instances and networks afterwards
+#
+# The whole run stops after HARNESS_TIMEOUT (default 45m).
 #   --server-release R Ubuntu release of the server VM (default 24.04). Use
 #                      26.04 to test with the in-kernel OpenVPN data channel (DCO).
 #
@@ -23,6 +25,15 @@ set -euo pipefail
 # If stdin is a terminal, `lxc` goes interactive. When the harness runs in the
 # background, that stops it (SIGTTIN/SIGTTOU) and it hangs forever.
 exec </dev/null
+
+# A full run takes about 10-15 minutes. If anything hangs, stop after
+# HARNESS_TIMEOUT. `timeout` signals the whole process group, so a stuck
+# `lxc` call stops too, and the TERM trap below still cleans up.
+if [[ -z "${HARNESS_UNDER_TIMEOUT:-}" ]]; then
+    export HARNESS_UNDER_TIMEOUT=1
+    exec timeout --kill-after=5m "${HARNESS_TIMEOUT:-45m}" "$0" "$@"
+fi
+trap 'echo "Harness timed out after ${HARNESS_TIMEOUT:-45m}" >&2; exit 124' TERM
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/lib.sh
