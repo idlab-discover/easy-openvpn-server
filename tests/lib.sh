@@ -391,6 +391,20 @@ warning_in_cli() {
 }
 
 
+# True when the client's data channel compresses: it says so (2.6+), or the
+# server pushed it compression options.
+client_vpn_compresses() {
+    local log
+    log="$(client_vpn_log "$1")"
+    grep -E "compression: '(lzo|lz4)" <<<"$log" >/dev/null ||
+        grep 'PUSH_REPLY' <<<"$log" | grep -E 'comp-lzo( yes|,)|compress (lzo|lz4)' >/dev/null
+}
+
+# True when the server told the client to stop compressing (`compress migrate`).
+client_vpn_told_to_stop_compressing() {
+    client_vpn_log "$1" | grep 'PUSH_REPLY' | grep 'compress stub-v2' >/dev/null
+}
+
 # run.sh sources these files as root, so only root may write them.
 daemon_env_files_are_private() {
     local stats

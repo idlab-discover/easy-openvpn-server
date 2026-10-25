@@ -130,6 +130,10 @@ scenario_upgrade() {
     for c in "${CLIENT_VMS[@]}"; do
         if require "$c: old default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/old-default-udp.ovpn"; then
             check "$c: reaches lan VM through the VPN (udp)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
+            if [[ -n "$UPGRADE_TO" ]]; then
+                check "$c: old config with comp-lzo is told to stop compressing" client_vpn_told_to_stop_compressing "$c"
+                check_not "$c: old config doesn't compress" client_vpn_compresses "$c"
+            fi
         else
             client_vpn_log "$c" >"$WORK/$c-udp.log"
         fi
@@ -254,6 +258,7 @@ scenario_fresh_install() {
     for c in "${CLIENT_VMS[@]}"; do
         if require "$c: new default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/new-default-udp.ovpn"; then
             check "$c: reaches lan VM through the VPN (udp, new config)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
+            check_not "$c: new config doesn't compress" client_vpn_compresses "$c"
         else
             client_vpn_log "$c" >"$WORK/$c-new-udp.log"
         fi
