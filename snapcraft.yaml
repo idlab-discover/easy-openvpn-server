@@ -164,7 +164,6 @@ parts:
     stage-packages:
       - openvpn
       - iptables
-      - libatm1
     # The `iptables` command is normally set up by update-alternatives, which
     # doesn't run for stage-packages. core22 provided it in the base; core26
     # doesn't. Use the nft backend, like core22 did.
