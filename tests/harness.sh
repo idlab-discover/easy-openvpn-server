@@ -217,6 +217,8 @@ scenario_client_to_client() {
     server_vm_exec snap set easy-openvpn-server firewall.client-to-client=false
     wait_for_daemons
     check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
+    check_not "client-to-client=false: other tunnels on the server aren't blocked (no -o tun+)" \
+        sh -c "lxc exec $SERVER_VM -- iptables -S eovpn-udp-server | grep -q -- '-o tun'"
     check_not "client-to-client=false: no warning in CLI output" warning_in_cli
 
     # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).

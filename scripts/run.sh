@@ -29,8 +29,9 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi    
 
 # Values the CLI (cli.py) wrote for this daemon: TUNNEL_NETWORK,
-# TUNNEL_NETWORK_6, DNS_SERVERS (the nameservers pushed to clients) and
-# CLIENT_TO_CLIENT. Only root can write this file.
+# TUNNEL_NETWORK_6, DNS_SERVERS (the nameservers pushed to clients),
+# CLIENT_TO_CLIENT and ALL_TUNNEL_NETWORKS (of both daemons, IPv4 and IPv6).
+# Only root can write this file.
 ENV_FILE="${CONFIG_FILE%.conf}.env"
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "Error: please generate config"
@@ -83,6 +84,11 @@ add_rule() {
 }
 
 # setup_chain <$IPTABLES|$IP6TABLES> <tunnel network> <blocked destinations...>
+# in_family <4|6> <address or network>
+in_family() {
+    if [[ "$1" == 6 ]]; then [[ "$2" == *:* ]]; else [[ "$2" != *:* ]]; fi
+}
+
 setup_chain() {
     local cmd="$1" net="$2" dns dest family
     shift 2
@@ -93,7 +99,7 @@ setup_chain() {
     [[ "$cmd" == "$IP6TABLES" ]] && family=6
     for dns in "${DNS_SERVERS[@]}"
     do
-        if [[ ( "$family" == 6 && "$dns" == *:* ) || ( "$family" == 4 && "$dns" != *:* ) ]]
+        if in_family "$family" "$dns"
         then
             "$cmd" -A "$CHAIN" -d "$dns" -p udp --dport 53 -j RETURN
             "$cmd" -A "$CHAIN" -d "$dns" -p tcp --dport 53 -j RETURN
@@ -103,10 +109,18 @@ setup_chain() {
     do
         "$cmd" -A "$CHAIN" -d "$dest" -j REJECT
     done
-    # Traffic to other VPN clients, of this server or the other one.
+    # Traffic to other VPN clients, of this server or the other one. Match
+    # their networks rather than `-o tun+`: the host may have other tunnels
+    # (e.g. another VPN) that VPN clients are allowed to use.
     if [[ "$CLIENT_TO_CLIENT" == block ]]
     then
-        "$cmd" -A "$CHAIN" -o tun+ -j REJECT
+        for dest in "${ALL_TUNNEL_NETWORKS[@]}"
+        do
+            if in_family "$family" "$dest"
+            then
+                "$cmd" -A "$CHAIN" -d "$dest" -j REJECT
+            fi
+        done
     fi
     remove_rule "$cmd" -A FORWARD -s "$net" -j "$CHAIN"
     "$cmd" -I FORWARD -s "$net" -j "$CHAIN" -m comment --comment "$COMMENT"
