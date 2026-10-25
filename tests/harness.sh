@@ -232,6 +232,7 @@ scenario_client_to_client() {
 # 7. Client config files and input validation.
 scenario_hygiene() {
     log "Scenario 7: file permissions and input validation"
+    check "private keys are only readable by root" private_keys_are_private
     check "the values run.sh sources are only writable by root" daemon_env_files_are_private
 
     check_not "firewall.client-to-client that isn't true or false is rejected" \
