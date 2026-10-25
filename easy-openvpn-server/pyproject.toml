@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easy-openvpn-server"
+version = "0.3"
+description = "Sets up and manages the OpenVPN servers of the easy-openvpn-server snap."
+requires-python = ">=3.10"
+# Not pinned: weekly snap rebuilds should pick up the latest versions,
+# especially of cryptography, which bundles its own OpenSSL.
+dependencies = [
+    "click",
+    "cryptography",
+    "jinja2",
+]
+
+[project.scripts]
+easy-openvpn-server = "easy_openvpn_server.cli:main"
+
+[tool.setuptools]
+packages = ["easy_openvpn_server"]

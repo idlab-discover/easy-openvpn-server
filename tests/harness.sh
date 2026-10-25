@@ -112,7 +112,7 @@ scenario_upgrade() {
     only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
 
     # Older versions also used `client-configs/` as client-config-dir. Check
-    # that files there never had any effect, as setup.py's warning claims.
+    # that files there never had any effect, as the CLI's warning claims.
     local bob_ip
     bob_ip="$(udp_tun_prefix).101"
     server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/easy-openvpn-server/current/client-configs/bob"

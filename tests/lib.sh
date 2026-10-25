@@ -448,7 +448,7 @@ server_wan_iface() {
 }
 
 # set_server_dns <servers...>: what the server's resolver uses, and so what
-# setup.py pushes. Without arguments, back to what DHCP gave.
+# the CLI pushes. Without arguments, back to what DHCP gave.
 set_server_dns() {
     local iface
     iface="$(server_wan_iface)"

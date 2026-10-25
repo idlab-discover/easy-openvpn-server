@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import datetime
 import errno
 import grp
@@ -28,6 +26,10 @@ from cryptography.x509 import load_pem_x509_certificate
 from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.x509.oid import NameOID
 from jinja2 import Environment, FileSystemLoader
+
+
+# The snap ships the templates in $SNAP/templates (the `templates` part).
+TEMPLATES_DIR = os.path.join(os.environ.get('SNAP', ''), 'templates')
 
 
 #
@@ -330,7 +332,7 @@ def get_dh_params_path(result_dir):
         return "./dh4096.pem"
     else:
         set_config("dh-params-type", "rfc3526")
-        return "{}/templates/RFC3526-dh4096.pem".format(os.environ['SNAP'])
+        return "{}/RFC3526-dh4096.pem".format(TEMPLATES_DIR)
 
 
 def create_psk(result_dir):
@@ -755,7 +757,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     }
     import jinja2
     j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
+        loader=FileSystemLoader(TEMPLATES_DIR),
         trim_blocks=True,
         lstrip_blocks=True,
         undefined=jinja2.StrictUndefined)
@@ -773,7 +775,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     udp_context['tunnel_network_v6'] = str(udp_tunnel_network_v6)
 
     j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
+        loader=FileSystemLoader(TEMPLATES_DIR),
         trim_blocks=True,
         lstrip_blocks=True)
     template = j2_env.get_template('server.conf')
@@ -820,7 +822,7 @@ def create_client_config(result_dir, name):
         'tls_auth': ta_key_str,
     }
     j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
+        loader=FileSystemLoader(TEMPLATES_DIR),                                                                                                                            
         trim_blocks=True,
         lstrip_blocks=True)
     template = j2_env.get_template('client.ovpn')
@@ -1021,5 +1023,11 @@ def remove_client(ctx, client_name):
     restart_daemons()
 
 
-if __name__ == "__main__":
+def main():
+    '''Entry point of the `easy-openvpn-server` command.
+    '''
     cli() #pylint: disable=E1123,E1120
+
+
+if __name__ == "__main__":
+    main()

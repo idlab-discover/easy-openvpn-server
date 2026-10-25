@@ -139,9 +139,7 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   easy-openvpn-server:
-    # Use the venv's interpreter explicitly: `$SNAP/usr/bin/python3` comes
-    # first in PATH and doesn't have our dependencies.
-    command: bin/python3 $SNAP/bin/setup.py
+    command: bin/easy-openvpn-server
     plugs:
       - network    
     environment:
@@ -177,12 +175,12 @@ parts:
       - python3-minimal
       - python3.14-minimal
       - python3.14-venv
-  scripts-dependencies:
+  # The `easy-openvpn-server` command: a Python package with an entry point.
+  # On core26, the plugin points its shebang at the venv's interpreter.
+  cli:
     after: [python-runtime]
     plugin: python
     source: easy-openvpn-server
-    python-requirements:
-      - requirements.txt
     stage-packages:
       - iproute2
       # Dependencies for `cryptography` on non-amd64 systems.

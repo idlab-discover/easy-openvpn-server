@@ -64,7 +64,7 @@ do
 done < "$CONFIG_FILE"
 echo "dns servers: ${DNS_SERVERS[*]}"
 
-# Settings and warnings that setup.py put in the config.
+# Settings and warnings that the CLI (cli.py) put in the config.
 CLIENT_TO_CLIENT=block
 regex='^# easy-openvpn-server: client-to-client=(.*)'
 while IFS= read -r line

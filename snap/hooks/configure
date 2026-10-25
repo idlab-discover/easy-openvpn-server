@@ -5,4 +5,4 @@ echo "RUNNING configure hook"
 
 export LC_ALL=C.UTF-8
 export LANG=C.UTF-8
-"$SNAP/bin/python3" "$SNAP/bin/setup.py" setup
+"$SNAP/bin/easy-openvpn-server" setup
