@@ -63,8 +63,8 @@ WORK="$(mktemp -d -t eovpn-harness.XXXXXX)"
 
 finish() {
     local rc=$?
-    if [[ $FAILED -gt 0 || $rc -ne 0 ]] && instance_exists "$SERVER"; then
-        lxc exec "$SERVER" -- journalctl -u "snap.$SNAP_NAME.*" --no-pager 2>/dev/null |
+    if [[ $FAILED -gt 0 || $rc -ne 0 ]] && vm_exists "$SERVER_VM"; then
+        lxc exec "$SERVER_VM" -- journalctl -u "snap.$SNAP_NAME.*" --no-pager 2>/dev/null |
             cat >"$WORK/server-journal.log" || true
         echo "Server journal saved to $WORK/server-journal.log" >&2
     fi
@@ -89,13 +89,13 @@ trap finish EXIT
 scenario_upgrade() {
     log "Scenario 1: upgrade"
     install_snap_from_store latest/stable
-    srv "$SNAP_NAME" add-client Alice >/dev/null 2>&1
-    srv "$SNAP_NAME" add-client bob >/dev/null 2>&1
+    server_vm_exec "$SNAP_NAME" add-client Alice >/dev/null 2>&1
+    server_vm_exec "$SNAP_NAME" add-client bob >/dev/null 2>&1
     # Older versions accepted any client name.
-    srv "$SNAP_NAME" add-client "odd name" >/dev/null 2>&1
+    server_vm_exec "$SNAP_NAME" add-client "odd name" >/dev/null 2>&1
     local name
     for name in default Alice bob; do
-        check "export $name.ovpn from stable" export_client "$name" "$WORK/old-$name.ovpn"
+        check "export $name.ovpn from stable" export_client_config "$name" "$WORK/old-$name.ovpn"
     done
     only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
 
@@ -103,11 +103,11 @@ scenario_upgrade() {
     # that files there never had any effect, as setup.py's warning claims.
     local bob_ip
     bob_ip="$(udp_tun_prefix).101"
-    srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/$SNAP_NAME/current/client-configs/bob"
-    if require "eovpn-c24: bob connects to stable" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
-        check_not "stable ignores client-configs/bob" client_has_ip eovpn-c24 "$bob_ip"
+    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/$SNAP_NAME/current/client-configs/bob"
+    if require "eovpn-client-2404-vm: bob connects to stable" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"; then
+        check_not "stable ignores client-configs/bob" client_vpn_has_ip eovpn-client-2404-vm "$bob_ip"
     fi
-    client_disconnect eovpn-c24
+    client_vpn_disconnect eovpn-client-2404-vm
 
     if [[ -n "$UPGRADE_TO" ]]; then
         upgrade_snap "$UPGRADE_TO"
@@ -116,24 +116,24 @@ scenario_upgrade() {
     only_proto udp "$WORK/old-default.ovpn" "$WORK/old-default-udp.ovpn"
     only_proto tcp "$WORK/old-default.ovpn" "$WORK/old-default-tcp.ovpn"
     local c
-    for c in "${CLIENTS[@]}"; do
-        if require "$c: old default.ovpn connects over udp" client_connect "$c" "$WORK/old-default-udp.ovpn"; then
-            check "$c: reaches lan host through the VPN (udp)" reaches_via_vpn "$c" "$LANHOST_IP"
+    for c in "${CLIENT_VMS[@]}"; do
+        if require "$c: old default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/old-default-udp.ovpn"; then
+            check "$c: reaches lan VM through the VPN (udp)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
             if [[ -n "$UPGRADE_TO" ]]; then
-                check "$c: old config with comp-lzo is told to stop compressing" client_told_to_stop_compressing "$c"
-                check_not "$c: old config doesn't compress" client_compresses "$c"
+                check "$c: old config with comp-lzo is told to stop compressing" client_vpn_told_to_stop_compressing "$c"
+                check_not "$c: old config doesn't compress" client_vpn_compresses "$c"
             fi
         else
-            client_log "$c" >"$WORK/$c-udp.log"
+            client_vpn_log "$c" >"$WORK/$c-udp.log"
         fi
-        client_disconnect "$c"
+        client_vpn_disconnect "$c"
     done
-    if require "eovpn-c24: old default.ovpn connects over tcp" client_connect eovpn-c24 "$WORK/old-default-tcp.ovpn"; then
-        check "eovpn-c24: reaches lan host through the VPN (tcp)" reaches_via_vpn eovpn-c24 "$LANHOST_IP"
+    if require "eovpn-client-2404-vm: old default.ovpn connects over tcp" client_vpn_connect eovpn-client-2404-vm "$WORK/old-default-tcp.ovpn"; then
+        check "eovpn-client-2404-vm: reaches lan VM through the VPN (tcp)" client_reaches_lan_vm_via_vpn eovpn-client-2404-vm "$LAN_VM_IP"
     else
-        client_log eovpn-c24 >"$WORK/eovpn-c24-tcp.log"
+        client_vpn_log eovpn-client-2404-vm >"$WORK/eovpn-client-2404-vm-tcp.log"
     fi
-    client_disconnect eovpn-c24
+    client_vpn_disconnect eovpn-client-2404-vm
 }
 
 # 3. Removing a client revokes its certificate, also when its name has capitals.
@@ -143,10 +143,10 @@ scenario_revocation() {
     wait_for_daemons
     only_proto udp "$WORK/old-Alice.ovpn" "$WORK/old-Alice-udp.ovpn"
     only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
-    check_not "eovpn-c24: removed client Alice can't connect" client_connect eovpn-c24 "$WORK/old-Alice-udp.ovpn"
-    client_disconnect eovpn-c24
-    check "eovpn-c24: other client bob still connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"
-    client_disconnect eovpn-c24
+    check_not "eovpn-client-2404-vm: removed client Alice can't connect" client_vpn_connect eovpn-client-2404-vm "$WORK/old-Alice-udp.ovpn"
+    client_vpn_disconnect eovpn-client-2404-vm
+    check "eovpn-client-2404-vm: other client bob still connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"
+    client_vpn_disconnect eovpn-client-2404-vm
     check_not "remove-client of an unknown client fails" snapcmd remove-client nobody
 }
 
@@ -155,42 +155,42 @@ scenario_ccd() {
     log "Scenario 4: client-specific config"
     local ccd="/var/snap/$SNAP_NAME/common/ccd" bob_ip
     bob_ip="$(udp_tun_prefix).101"
-    srv sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
-    srv sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
-    if require "eovpn-c24: bob connects" client_connect eovpn-c24 "$WORK/old-bob-udp.ovpn"; then
-        check "ccd/bob gives bob its fixed address" client_has_ip eovpn-c24 "$bob_ip"
-        check_not "ccd/DEFAULT doesn't apply to bob, who has his own file" client_has_route eovpn-c24 192.0.2.0/24
+    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
+    server_vm_exec sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
+    if require "eovpn-client-2404-vm: bob connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"; then
+        check "ccd/bob gives bob its fixed address" client_vpn_has_ip eovpn-client-2404-vm "$bob_ip"
+        check_not "ccd/DEFAULT doesn't apply to bob, who has his own file" client_vpn_has_route eovpn-client-2404-vm 192.0.2.0/24
     fi
-    client_disconnect eovpn-c24
-    if require "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
-        check "ccd/DEFAULT applies to clients without their own file" client_has_route eovpn-c24 192.0.2.0/24
+    client_vpn_disconnect eovpn-client-2404-vm
+    if require "eovpn-client-2404-vm: default connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-default-udp.ovpn"; then
+        check "ccd/DEFAULT applies to clients without their own file" client_vpn_has_route eovpn-client-2404-vm 192.0.2.0/24
     fi
-    client_disconnect eovpn-c24
-    srv rm -f "$ccd/bob" "$ccd/DEFAULT"
+    client_vpn_disconnect eovpn-client-2404-vm
+    server_vm_exec rm -f "$ccd/bob" "$ccd/DEFAULT"
     check "setup warns about files in the old client-configs folder" \
-        sh -c "lxc exec $SERVER -- $SNAP_NAME setup 2>&1 | grep -q 'client-specific config'"
+        sh -c "lxc exec $SERVER_VM -- $SNAP_NAME setup 2>&1 | grep -q 'client-specific config'"
     wait_for_daemons
 }
 
 # 5. Firewall rules for traffic from VPN clients.
 scenario_firewall() {
     log "Scenario 5: firewall"
-    if require "eovpn-c24: default connects" client_connect eovpn-c24 "$WORK/old-default-udp.ovpn"; then
-        check "eovpn-c24: lan host is reachable through the VPN" reaches_via_vpn eovpn-c24 "$LANHOST_IP"
-        check_not "eovpn-c24: cloud metadata ($METADATA_IP) is blocked" reaches_via_vpn eovpn-c24 "$METADATA_IP"
+    if require "eovpn-client-2404-vm: default connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-default-udp.ovpn"; then
+        check "eovpn-client-2404-vm: lan VM is reachable through the VPN" client_reaches_lan_vm_via_vpn eovpn-client-2404-vm "$LAN_VM_IP"
+        check_not "eovpn-client-2404-vm: cloud metadata ($METADATA_IP) is blocked" client_reaches_lan_vm_via_vpn eovpn-client-2404-vm "$METADATA_IP"
     fi
-    client_disconnect eovpn-c24
+    client_vpn_disconnect eovpn-client-2404-vm
     check "DNS servers pushed to clients are exempt from the blocks" \
-        sh -c "lxc exec $SERVER -- iptables -S eovpn-udp-server | grep -q -- '--dport 53 -j RETURN'"
+        sh -c "lxc exec $SERVER_VM -- iptables -S eovpn-udp-server | grep -q -- '--dport 53 -j RETURN'"
 
-    srv snap restart "$SNAP_NAME" >/dev/null
+    server_vm_exec snap restart "$SNAP_NAME" >/dev/null
     wait_for_daemons
     check "no duplicate rules after a restart (iptables)" fw_rule_count iptables 2
     check "no duplicate rules after a restart (ip6tables)" fw_rule_count ip6tables 2
-    srv snap stop "$SNAP_NAME" >/dev/null
+    server_vm_exec snap stop "$SNAP_NAME" >/dev/null
     check "no rules left after stopping (iptables)" fw_rule_count iptables 0
     check "no rules left after stopping (ip6tables)" fw_rule_count ip6tables 0
-    srv snap start "$SNAP_NAME" >/dev/null
+    server_vm_exec snap start "$SNAP_NAME" >/dev/null
     wait_for_daemons
 }
 
@@ -204,18 +204,18 @@ scenario_client_to_client() {
     check "upgraded install: warning in CLI output" warning_in_cli
     check "upgraded install: warning in the daemon log" warning_in_journal
 
-    srv snap set "$SNAP_NAME" firewall.client-to-client=false
+    server_vm_exec snap set "$SNAP_NAME" firewall.client-to-client=false
     wait_for_daemons
     check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
     check_not "client-to-client=false: no warning in status" warning_in_status
     check_not "client-to-client=false: no warning in CLI output" warning_in_cli
 
     # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).
-    srv snap set "$SNAP_NAME" firewall.client-to-client=true push-default-gateway=False
+    server_vm_exec snap set "$SNAP_NAME" firewall.client-to-client=true push-default-gateway=False
     wait_for_daemons
     check_client_to_client allowed "client-to-client=true: clients reach each other without the default gateway" "$cfg"
     check_not "client-to-client=true: no warning in status" warning_in_status
-    srv snap set "$SNAP_NAME" push-default-gateway=True
+    server_vm_exec snap set "$SNAP_NAME" push-default-gateway=True
     wait_for_daemons
 }
 
@@ -233,11 +233,11 @@ scenario_hygiene() {
     check_not "show-client rejects a path" snapcmd show-client ../ca
 
     check_not "public-address with a newline is rejected" \
-        lxc exec "$SERVER" -- snap set "$SNAP_NAME" public-address=$'vpn.example.com\nscript-security 2'
+        lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" public-address=$'vpn.example.com\nscript-security 2'
     check_not "additional-search-domains with a quote is rejected" \
-        lxc exec "$SERVER" -- snap set "$SNAP_NAME" 'additional-search-domains=x"y'
-    check "a valid public-address is accepted" lxc exec "$SERVER" -- snap set "$SNAP_NAME" public-address=vpn.example.com
-    srv snap unset "$SNAP_NAME" public-address
+        lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" 'additional-search-domains=x"y'
+    check "a valid public-address is accepted" lxc exec "$SERVER_VM" -- snap set "$SNAP_NAME" public-address=vpn.example.com
+    server_vm_exec snap unset "$SNAP_NAME" public-address
     wait_for_daemons
 }
 
@@ -249,31 +249,31 @@ scenario_dns() {
     set_server_dns "$dns_v4" "$dns_v6"
     check "setup works with an IPv6 nameserver" snapcmd setup
     wait_for_daemons
-    if require "eovpn-c26: connects" client_connect eovpn-c26 "$cfg"; then
-        check "the IPv4 nameserver is pushed" client_got_pushed eovpn-c26 "dhcp-option DNS $dns_v4"
-        check "the IPv6 nameserver is pushed" client_got_pushed eovpn-c26 "dhcp-option DNS6 $dns_v6"
-        check "the IPv6 nameserver is routed through the VPN" client_got_pushed eovpn-c26 "route-ipv6 $dns_v6/128"
-        check "the IPv4 nameserver comes first" dns_pushed_ipv4_first eovpn-c26
+    if require "eovpn-client-2604-vm: connects" client_vpn_connect eovpn-client-2604-vm "$cfg"; then
+        check "the IPv4 nameserver is pushed" client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS $dns_v4"
+        check "the IPv6 nameserver is pushed" client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS6 $dns_v6"
+        check "the IPv6 nameserver is routed through the VPN" client_vpn_got_pushed eovpn-client-2604-vm "route-ipv6 $dns_v6/128"
+        check "the IPv4 nameserver comes first" dns_pushed_ipv4_first eovpn-client-2604-vm
     fi
-    client_disconnect eovpn-c26
+    client_vpn_disconnect eovpn-client-2604-vm
 
     # Clients that can't use IPv6 rely on the IPv4 nameserver. (Linux clients
     # with IPv6 disabled completely can't connect at all: the server always
     # gives clients an IPv6 address, and OpenVPN fails when it can't add it.)
-    if require "eovpn-c24: connects" client_connect eovpn-c24 "$cfg"; then
-        check "eovpn-c24: gets DNS answers from the IPv4 nameserver through the VPN" \
-            client_dns_query eovpn-c24 "$dns_v4"
+    if require "eovpn-client-2404-vm: connects" client_vpn_connect eovpn-client-2404-vm "$cfg"; then
+        check "eovpn-client-2404-vm: gets DNS answers from the IPv4 nameserver through the VPN" \
+            client_vpn_dns_query eovpn-client-2404-vm "$dns_v4"
     fi
-    client_disconnect eovpn-c24
+    client_vpn_disconnect eovpn-client-2404-vm
 
     set_server_dns "$dns_v6"
     check "setup works with only an IPv6 nameserver" snapcmd setup
     wait_for_daemons
-    if require "eovpn-c26: connects" client_connect eovpn-c26 "$cfg"; then
+    if require "eovpn-client-2604-vm: connects" client_vpn_connect eovpn-client-2604-vm "$cfg"; then
         check "with only IPv6 nameservers, the IPv4 fallback is pushed" \
-            client_got_pushed eovpn-c26 "dhcp-option DNS 208.67.222.222"
+            client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS 208.67.222.222"
     fi
-    client_disconnect eovpn-c26
+    client_vpn_disconnect eovpn-client-2604-vm
 
     set_server_dns
     snapcmd setup || true
@@ -283,43 +283,43 @@ scenario_dns() {
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
-    srv snap remove --purge "$SNAP_NAME" >/dev/null
+    server_vm_exec snap remove --purge "$SNAP_NAME" >/dev/null
     if [[ -f "$UPGRADE_TO" ]]; then
-        lx file push "$UPGRADE_TO" "$SERVER/root/under-test.snap"
-        srv snap install --dangerous /root/under-test.snap >/dev/null
-        srv snap connect "$SNAP_NAME:network-control"
-        srv snap connect "$SNAP_NAME:firewall-control"
+        lx file push "$UPGRADE_TO" "$SERVER_VM/root/under-test.snap"
+        server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
+        server_vm_exec snap connect "$SNAP_NAME:network-control"
+        server_vm_exec snap connect "$SNAP_NAME:firewall-control"
         wait_for_daemons
     else
         install_snap_from_store "$UPGRADE_TO"
     fi
-    if ! require "export default.ovpn from fresh install" export_client default "$WORK/new-default.ovpn"; then return 0; fi
+    if ! require "export default.ovpn from fresh install" export_client_config default "$WORK/new-default.ovpn"; then return 0; fi
     only_proto udp "$WORK/new-default.ovpn" "$WORK/new-default-udp.ovpn"
     only_proto tcp "$WORK/new-default.ovpn" "$WORK/new-default-tcp.ovpn"
     local c
-    for c in "${CLIENTS[@]}"; do
-        if require "$c: new default.ovpn connects over udp" client_connect "$c" "$WORK/new-default-udp.ovpn"; then
-            check "$c: reaches lan host through the VPN (udp, new config)" reaches_via_vpn "$c" "$LANHOST_IP"
-            check_not "$c: new config doesn't compress" client_compresses "$c"
-            check "$c: uses an AEAD data cipher" client_uses_aead_cipher "$c"
-            check "$c: block-outside-dns is pushed" client_got_pushed "$c" block-outside-dns
+    for c in "${CLIENT_VMS[@]}"; do
+        if require "$c: new default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/new-default-udp.ovpn"; then
+            check "$c: reaches lan VM through the VPN (udp, new config)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
+            check_not "$c: new config doesn't compress" client_vpn_compresses "$c"
+            check "$c: uses an AEAD data cipher" client_vpn_uses_aead_cipher "$c"
+            check "$c: block-outside-dns is pushed" client_vpn_got_pushed "$c" block-outside-dns
         else
-            client_log "$c" >"$WORK/$c-new-udp.log"
+            client_vpn_log "$c" >"$WORK/$c-new-udp.log"
         fi
-        client_disconnect "$c"
+        client_vpn_disconnect "$c"
     done
-    if require "eovpn-c26: new default.ovpn connects over tcp" client_connect eovpn-c26 "$WORK/new-default-tcp.ovpn"; then
-        check "eovpn-c26: reaches lan host through the VPN (tcp, new config)" reaches_via_vpn eovpn-c26 "$LANHOST_IP"
+    if require "eovpn-client-2604-vm: new default.ovpn connects over tcp" client_vpn_connect eovpn-client-2604-vm "$WORK/new-default-tcp.ovpn"; then
+        check "eovpn-client-2604-vm: reaches lan VM through the VPN (tcp, new config)" client_reaches_lan_vm_via_vpn eovpn-client-2604-vm "$LAN_VM_IP"
     else
-        client_log eovpn-c26 >"$WORK/eovpn-c26-new-tcp.log"
+        client_vpn_log eovpn-client-2604-vm >"$WORK/eovpn-client-2604-vm-new-tcp.log"
     fi
-    client_disconnect eovpn-c26
+    client_vpn_disconnect eovpn-client-2604-vm
     check_client_to_client blocked "fresh install: clients can't reach each other" "$WORK/new-default-udp.ovpn"
     if require "build a config that uses the server's certificate" \
         with_server_cert "$WORK/new-default-udp.ovpn" "$WORK/server-cert-udp.ovpn"; then
         check_not "the server's certificate can't be used to connect as a client" \
-            client_connect eovpn-c24 "$WORK/server-cert-udp.ovpn"
-        client_disconnect eovpn-c24
+            client_vpn_connect eovpn-client-2404-vm "$WORK/server-cert-udp.ovpn"
+        client_vpn_disconnect eovpn-client-2404-vm
     fi
     check_not "fresh install: no client-to-client warning" warning_in_status
 }
