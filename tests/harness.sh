@@ -100,9 +100,10 @@ trap finish EXIT
 scenario_upgrade() {
     log "Scenario 1: upgrade"
     install_snap_from_store latest/stable
-    # The snap creates `default` itself.
+    # The snap creates `default` itself. Older versions accepted any client
+    # name; scenario 7 checks that "odd name" can still be removed.
     local name
-    for name in default Alice bob; do
+    for name in default Alice bob "odd name"; do
         if [[ "$name" != default ]]; then
             server_vm_exec easy-openvpn-server add-client "$name" >/dev/null 2>&1
         fi
@@ -236,8 +237,23 @@ scenario_hygiene() {
     check "private keys are only readable by root" private_keys_are_private
     check "the values run.sh sources are only writable by root" daemon_env_files_are_private
 
+    check_not "add-client rejects a name with a path" snapcmd add-client ../x
+    check_not "add-client rejects a name with a space" snapcmd add-client "new name"
+    check "add-client accepts a normal name" snapcmd add-client Carol.laptop-2
+    check "a client with an odd name from an older version can still be removed" \
+        snapcmd remove-client "odd name"
+    check_not "show-client of an unknown client fails" snapcmd show-client nobody
+    check_not "show-client rejects a path" snapcmd show-client ../ca
+
+    check_not "public-address with a newline is rejected" \
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=$'vpn.example.com\nscript-security 2'
     check_not "firewall.client-to-client that isn't true or false is rejected" \
         lxc exec "$SERVER_VM" -- snap set easy-openvpn-server firewall.client-to-client=maybe
+    check_not "additional-search-domains with a quote is rejected" \
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server 'additional-search-domains=x"y'
+    check "a valid public-address is accepted" lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=vpn.example.com
+    server_vm_exec snap unset easy-openvpn-server public-address
+    wait_for_daemons
 }
 
 # 2. A fresh install of the snap under test works, and new configs connect.
