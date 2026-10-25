@@ -54,7 +54,7 @@ jobs:
         # 26.04 has the in-kernel OpenVPN data channel (DCO), 24.04 doesn't.
         server-release: ["24.04", "26.04"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Allow access to KVM, for the server VM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
