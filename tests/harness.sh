@@ -259,6 +259,8 @@ scenario_fresh_install() {
         if require "$c: new default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/new-default-udp.ovpn"; then
             check "$c: reaches lan VM through the VPN (udp, new config)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
             check_not "$c: new config doesn't compress" client_vpn_compresses "$c"
+            check "$c: uses an AEAD data cipher" client_vpn_uses_aead_cipher "$c"
+            check "$c: block-outside-dns is pushed" client_vpn_got_pushed "$c" block-outside-dns
         else
             client_vpn_log "$c" >"$WORK/$c-new-udp.log"
         fi
@@ -271,6 +273,12 @@ scenario_fresh_install() {
     fi
     client_vpn_disconnect eovpn-client-2604-vm
     check_client_to_client blocked "fresh install: clients can't reach each other" "$WORK/new-default-udp.ovpn"
+    if require "build a config that uses the server's certificate" \
+        with_server_cert "$WORK/new-default-udp.ovpn" "$WORK/server-cert-udp.ovpn"; then
+        check_not "the server's certificate can't be used to connect as a client" \
+            client_vpn_connect eovpn-client-2404-vm "$WORK/server-cert-udp.ovpn"
+        client_vpn_disconnect eovpn-client-2404-vm
+    fi
     check_not "fresh install: no client-to-client warning" warning_in_cli
 }
 
