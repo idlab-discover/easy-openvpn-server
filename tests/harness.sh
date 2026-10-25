@@ -132,6 +132,20 @@ scenario_upgrade() {
     client_vpn_disconnect eovpn-client-2404-vm
 }
 
+# 3. Removing a client revokes its certificate, also when its name has capitals.
+scenario_revocation() {
+    log "Scenario 3: revocation"
+    check "remove-client Alice succeeds" snapcmd remove-client Alice
+    wait_for_daemons
+    only_proto udp "$WORK/old-Alice.ovpn" "$WORK/old-Alice-udp.ovpn"
+    only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
+    check_not "eovpn-client-2404-vm: removed client Alice can't connect" client_vpn_connect eovpn-client-2404-vm "$WORK/old-Alice-udp.ovpn"
+    client_vpn_disconnect eovpn-client-2404-vm
+    check "eovpn-client-2404-vm: other client bob still connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"
+    client_vpn_disconnect eovpn-client-2404-vm
+    check_not "remove-client of an unknown client fails" snapcmd remove-client nobody
+}
+
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
@@ -168,6 +182,7 @@ scenario_fresh_install() {
 log "Work directory: $WORK"
 setup_topology
 scenario_upgrade
+scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_fresh_install
 fi

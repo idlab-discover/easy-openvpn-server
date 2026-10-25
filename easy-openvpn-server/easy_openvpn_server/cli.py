@@ -262,6 +262,9 @@ def create_crl(result_dir):
 
 
 def revoke_client_cert(result_dir, client_name):
+    '''Adds the client's certificate to the CRL. Returns False if the
+    certificate couldn't be found.
+    '''
     if not os.path.isfile("{}/crl.pem".format(result_dir)):
         create_crl(result_dir)
     
@@ -272,8 +275,8 @@ def revoke_client_cert(result_dir, client_name):
         try:
             cert_to_revoke_data = open("{}/client-configs/{}.crt.removed".format(result_dir, client_name),"rb").read()
         except FileNotFoundError:
-            logging.warning("Could not find client certificate, can't revoke client.")
-            return
+            logging.error("Could not find a certificate for client {}, can't revoke it.".format(client_name))
+            return False
 
     cert_to_revoke = x509.load_pem_x509_certificate(cert_to_revoke_data, backend=default_backend())
 
@@ -318,6 +321,7 @@ def revoke_client_cert(result_dir, client_name):
     cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
     with open("{}/crl.pem".format(result_dir),"wb") as f:
         f.write(cert_revocation_list.public_bytes(serialization.Encoding.PEM))
+    return True
 
 
 def create_dh_params(result_dir):
@@ -831,8 +835,11 @@ def list_clients(ctx):
 def remove_client(ctx, client_name):
     """Remove the client config.
     """
-    client_name = client_name.lower()
-    revoke_client_cert(ctx.obj["result_dir"], client_name)
+    if not revoke_client_cert(ctx.obj["result_dir"], client_name):
+        logging.error(
+            "Client {} was not removed. Run `sudo easy-openvpn-server list-clients` "
+            "to see the existing clients.".format(client_name))
+        sys.exit(1)
     try:
         os.rename(
             "{}/client-configs/{}.ovpn".format(ctx.obj["result_dir"], client_name),
