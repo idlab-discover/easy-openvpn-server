@@ -436,6 +436,44 @@ ovpn_files_are_private() {
     [[ -n "$modes" ]] && ! grep -v '^600$' <<<"$modes" >/dev/null
 }
 
+# The server's wan interface, e.g. enp5s0.
+server_wan_iface() {
+    lxc exec "$SERVER_VM" -- ip -o route show default | cat | awk '{print $5}'
+}
+
+# set_server_dns <servers...>: what the server's resolver uses, and so what
+# the CLI pushes. Without arguments, back to what DHCP gave.
+set_server_dns() {
+    local iface
+    iface="$(server_wan_iface)"
+    if [[ $# -eq 0 ]]; then
+        server_vm_exec resolvectl revert "$iface"
+    else
+        server_vm_exec resolvectl dns "$iface" "$@"
+    fi
+}
+
+# True when the IPv4 nameserver comes before any IPv6 one in what the
+# server pushed.
+dns_pushed_ipv4_first() {
+    local reply
+    reply="$(client_vpn_log "$1" | grep PUSH_REPLY)"
+    [[ "$reply" == *"dhcp-option DNS "* && "${reply%%dhcp-option DNS6*}" == *"dhcp-option DNS "* ]]
+}
+
+# client_vpn_dns_query <client-vm> <nameserver>: send a DNS query and check an
+# answer comes back (any answer, even NXDOMAIN).
+client_vpn_dns_query() {
+    lxc exec "$1" -- python3 -c '
+import socket, sys
+query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x06ubuntu\x03com\x00\x00\x01\x00\x01"
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(5)
+s.sendto(query, (sys.argv[1], 53))
+sys.exit(0 if s.recv(512)[:2] == b"\x12\x34" else 1)
+' "$2" >/dev/null 2>&1
+}
+
 # run.sh sources these files as root, so only root may write them.
 daemon_env_files_are_private() {
     local stats

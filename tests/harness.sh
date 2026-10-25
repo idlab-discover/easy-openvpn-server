@@ -257,6 +257,45 @@ scenario_hygiene() {
     wait_for_daemons
 }
 
+# 8. Nameservers pushed to clients: IPv4 and IPv6, IPv4 first.
+scenario_dns() {
+    log "Scenario 8: DNS"
+    local cfg="$WORK/old-default-udp.ovpn" dns_v4=10.250.0.1 dns_v6=2001:db8:53::53
+
+    set_server_dns "$dns_v4" "$dns_v6"
+    check "setup works with an IPv6 nameserver" snapcmd setup
+    wait_for_daemons
+    if require "eovpn-client-2604-vm: connects" client_vpn_connect eovpn-client-2604-vm "$cfg"; then
+        check "the IPv4 nameserver is pushed" client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS $dns_v4"
+        check "the IPv6 nameserver is pushed" client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS6 $dns_v6"
+        check "the IPv6 nameserver is routed through the VPN" client_vpn_got_pushed eovpn-client-2604-vm "route-ipv6 $dns_v6/128"
+        check "the IPv4 nameserver comes first" dns_pushed_ipv4_first eovpn-client-2604-vm
+    fi
+    client_vpn_disconnect eovpn-client-2604-vm
+
+    # Clients that can't use IPv6 rely on the IPv4 nameserver. (Linux clients
+    # with IPv6 disabled completely can't connect at all: the server always
+    # gives clients an IPv6 address, and OpenVPN fails when it can't add it.)
+    if require "eovpn-client-2404-vm: connects" client_vpn_connect eovpn-client-2404-vm "$cfg"; then
+        check "eovpn-client-2404-vm: gets DNS answers from the IPv4 nameserver through the VPN" \
+            client_vpn_dns_query eovpn-client-2404-vm "$dns_v4"
+    fi
+    client_vpn_disconnect eovpn-client-2404-vm
+
+    set_server_dns "$dns_v6"
+    check "setup works with only an IPv6 nameserver" snapcmd setup
+    wait_for_daemons
+    if require "eovpn-client-2604-vm: connects" client_vpn_connect eovpn-client-2604-vm "$cfg"; then
+        check "with only IPv6 nameservers, the IPv4 fallback is pushed" \
+            client_vpn_got_pushed eovpn-client-2604-vm "dhcp-option DNS 208.67.222.222"
+    fi
+    client_vpn_disconnect eovpn-client-2604-vm
+
+    set_server_dns
+    snapcmd setup || true
+    wait_for_daemons
+}
+
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
@@ -310,5 +349,6 @@ if [[ -n "$UPGRADE_TO" ]]; then
     scenario_firewall
     scenario_client_to_client
     scenario_hygiene
+    scenario_dns
     scenario_fresh_install
 fi
