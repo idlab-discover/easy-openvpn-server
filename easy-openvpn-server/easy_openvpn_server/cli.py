@@ -58,13 +58,15 @@ PRIVATE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
 
 def write_private_file(path, data):
     '''Writes `data` (str or bytes) to a file that only root can read. The
-    file never exists with wider permissions, not even briefly.
+    data is never in a file with wider permissions, not even briefly.
     '''
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    # os.open's mode only applies to new files. Fix the mode of files from
+    # older versions too, before writing anything into them. (O_TRUNC has
+    # already emptied them.)
+    os.fchmod(fd, PRIVATE_FILE_MODE)
     with os.fdopen(fd, 'wb' if isinstance(data, bytes) else 'w') as f:
         f.write(data)
-    # os.open's mode only applies to new files: also fix files from older versions.
-    os.chmod(path, PRIVATE_FILE_MODE)
 
 
 def create_RSA_keypair(path):
