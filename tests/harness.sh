@@ -288,8 +288,8 @@ scenario_fresh_install() {
     if [[ -f "$UPGRADE_TO" ]]; then
         lx file push "$UPGRADE_TO" "$SERVER_VM/root/under-test.snap"
         server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
-        server_vm_exec snap connect "easy-openvpn-server:network-control"
-        server_vm_exec snap connect "easy-openvpn-server:firewall-control"
+        # Auto-connect doesn't apply to local snaps.
+        connect_interfaces
         wait_for_daemons
     else
         install_snap_from_store "$UPGRADE_TO"

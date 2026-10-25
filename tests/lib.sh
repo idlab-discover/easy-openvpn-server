@@ -208,12 +208,32 @@ wait_for_daemons() {
         retry 60 sh -c "lxc exec $SERVER_VM -- ss -Hltn 'sport = :443' | grep -q ."
 }
 
+# True when both interfaces the daemons need are connected.
+interfaces_connected() {
+    local connections
+    connections="$(lxc exec "$SERVER_VM" -- snap connections easy-openvpn-server | cat)"
+    grep -E '^network-control +easy-openvpn-server:network-control +:network-control' <<<"$connections" >/dev/null &&
+        grep -E '^firewall-control +easy-openvpn-server:firewall-control +:firewall-control' <<<"$connections" >/dev/null
+}
+
+connect_interfaces() {
+    server_vm_exec snap connect easy-openvpn-server:network-control
+    server_vm_exec snap connect easy-openvpn-server:firewall-control
+}
+
+# The store auto-connects the interfaces for this snap. Check that, and only
+# connect them when it didn't, so the other scenarios can still run.
+check_store_auto_connects_interfaces() {
+    if ! require "$1: the store auto-connects network-control and firewall-control" interfaces_connected; then
+        connect_interfaces
+    fi
+}
+
 install_snap_from_store() {
     local channel="$1"
     log "Installing easy-openvpn-server from $channel"
     server_vm_exec snap install easy-openvpn-server --channel="$channel" >/dev/null
-    server_vm_exec snap connect "easy-openvpn-server:network-control"
-    server_vm_exec snap connect "easy-openvpn-server:firewall-control"
+    check_store_auto_connects_interfaces "install from $channel"
     wait_for_daemons
 }
 
@@ -224,13 +244,13 @@ upgrade_snap() {
         log "Upgrading to $target"
         lx file push "$target" "$SERVER_VM/root/under-test.snap"
         server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
+        # Auto-connect doesn't apply to local snaps.
+        connect_interfaces
     else
         log "Upgrading to channel $target"
         server_vm_exec snap refresh easy-openvpn-server --channel="$target" >/dev/null
+        check_store_auto_connects_interfaces "upgrade to $target"
     fi
-    # Interfaces stay connected on upgrade, but be explicit.
-    server_vm_exec snap connect "easy-openvpn-server:network-control"
-    server_vm_exec snap connect "easy-openvpn-server:firewall-control"
     server_vm_exec snap restart easy-openvpn-server >/dev/null
     wait_for_daemons
 }
