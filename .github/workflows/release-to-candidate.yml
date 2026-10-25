@@ -7,7 +7,7 @@ name: Release
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "candidate" ]
   # Rebuild weekly, so the snap picks up security fixes in the packages it
   # bundles (OpenVPN, OpenSSL, Python and its dependencies).
   schedule:
