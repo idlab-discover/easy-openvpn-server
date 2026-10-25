@@ -421,13 +421,7 @@ def get_dns_info():
     info = parse_resolvconf('/etc/resolv.conf')
     # Often, resolf.conf will point to local resolver. If this resolver is
     # resolvd, we can scan its file. Otherwise, don't pass a nameserver.
-    loopback_ns = False
-    for ns_address in info['nameservers']:
-        try:
-            if ip_address(ns_address).is_loopback:
-                loopback_ns = True
-        except ValueError:
-            pass
+    loopback_ns = any(ns_address.is_loopback for ns_address in info['nameservers'])
 
     if loopback_ns:
         info['nameservers'] = []
@@ -450,15 +444,9 @@ def get_dns_servers(dns_info):
     '''
     servers_v4 = []
     servers_v6 = []
-    for ns_address in dns_info.get('nameservers', []):
-        try:
-            address = ip_address(ns_address)
-        except ValueError:
-            # e.g. a link-local address with a zone: `fe80::1%eth0`
-            logging.info("Not pushing nameserver {}: clients can't reach it.".format(ns_address))
-            continue
+    for address in dns_info.get('nameservers', []):
         if address.is_loopback or (address.is_link_local and address.version == 6):
-            logging.info("Not pushing nameserver {}: clients can't reach it.".format(ns_address))
+            logging.info("Not pushing nameserver {}: clients can't reach it.".format(address))
         elif address.version == 4:
             servers_v4.append(str(address))
         else:
@@ -470,6 +458,9 @@ def get_dns_servers(dns_info):
 
 
 def parse_resolvconf(resolv_path):
+    '''Returns the nameservers (as ip_address objects) and search domains of
+    a resolv.conf file. Skips nameservers that aren't plain IP addresses.
+    '''
     info = {
         "nameservers": []
     }
@@ -479,7 +470,10 @@ def parse_resolvconf(resolv_path):
         words = line.split()
         if len(words) > 1:
             if words[0] == "nameserver":
-                info['nameservers'].append(words[1])
+                try:
+                    info['nameservers'].append(ip_address(words[1]))
+                except ValueError:
+                    logging.info("Not using nameserver {}: not an IP address.".format(words[1]))
             elif words[0] == "search":
                 info['search'] = words[1:]
     return info
