@@ -89,12 +89,13 @@ trap finish EXIT
 scenario_upgrade() {
     log "Scenario 1: upgrade"
     install_snap_from_store latest/stable
-    server_vm_exec easy-openvpn-server add-client Alice >/dev/null 2>&1
-    server_vm_exec easy-openvpn-server add-client bob >/dev/null 2>&1
-    # Older versions accepted any client name.
-    server_vm_exec easy-openvpn-server add-client "odd name" >/dev/null 2>&1
+    # The snap creates `default` itself. Older versions accepted any client
+    # name; scenario 7 checks that "odd name" can still be removed.
     local name
-    for name in default Alice bob; do
+    for name in default Alice bob "odd name"; do
+        if [[ "$name" != default ]]; then
+            server_vm_exec easy-openvpn-server add-client "$name" >/dev/null 2>&1
+        fi
         check "export $name.ovpn from stable" export_client_config "$name" "$WORK/old-$name.ovpn"
     done
     only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
