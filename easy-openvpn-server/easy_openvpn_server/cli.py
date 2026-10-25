@@ -39,6 +39,21 @@ TEMPLATES_DIR = os.path.join(os.environ.get('SNAP', ''), 'templates')
 #
 #
 
+# Only root may read or write files with secrets in them.
+PRIVATE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
+
+
+def write_private_file(path, data):
+    '''Writes `data` (str or bytes) to a file that only root can read. The
+    file never exists with wider permissions, not even briefly.
+    '''
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    with os.fdopen(fd, 'wb' if isinstance(data, bytes) else 'w') as f:
+        f.write(data)
+    # os.open's mode only applies to new files: also fix files from older versions.
+    os.chmod(path, PRIVATE_FILE_MODE)
+
+
 def create_RSA_keypair(path):
     '''Creates and returns an RSA keypair and writes the private key to disk.
     '''
@@ -797,9 +812,7 @@ def write_daemon_env(path, tunnel_network, context):
     j2_env.filters['shell_quote'] = shlex.quote
     output = j2_env.get_template('server.env').render(
         tunnel_network_cidr=str(tunnel_network), **context)
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
-        f.write(output)
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    write_private_file(path, output)
 
 
 def create_client_config_dir(daemon_dir):
@@ -847,10 +860,7 @@ def create_client_config(result_dir, name):
     output = template.render(output=result_dir, **context)
     # The config contains the client's private key: only root may read it.
     path = "{}/client-configs/{}.ovpn".format(result_dir, name)
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
-        f.write(output)
-    # Also fix files created by older versions.
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    write_private_file(path, output)
 
 
 def show_client_config(result_dir, name):
