@@ -338,3 +338,10 @@ client_vpn_has_ip() {
 client_vpn_has_route() {
     lxc exec "$1" -- ip -4 route show "$2" | cat | grep tun0 >/dev/null
 }
+
+# run.sh sources these files as root, so only root may write them.
+daemon_env_files_are_private() {
+    local stats
+    stats="$(lxc exec "$SERVER_VM" -- sh -c "stat -c '%a %U' /root/snap/easy-openvpn-server/current/*-server.env" | cat)"
+    [[ "$(wc -l <<<"$stats")" == 2 ]] && ! grep -v '^600 root$' <<<"$stats" >/dev/null
+}

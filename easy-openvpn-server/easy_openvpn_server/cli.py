@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pwd
 import random
+import shlex
 import socket
 import stat
 import subprocess
@@ -37,6 +38,7 @@ JINJA_ENV = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
     undefined=StrictUndefined)
+JINJA_ENV.filters['shell_quote'] = shlex.quote
 
 
 def render_template(name, **context):
@@ -48,6 +50,23 @@ def render_template(name, **context):
 # Certificate and key management
 #
 #
+
+# Only root may read or write files with secrets in them.
+PRIVATE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
+
+
+def write_private_file(path, data):
+    '''Writes `data` (str or bytes) to a file that only root can read. The
+    data is never in a file with wider permissions, not even briefly.
+    '''
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    # os.open's mode only applies to new files. Fix the mode of files from
+    # older versions too, before writing anything into them. (O_TRUNC has
+    # already emptied them.)
+    os.fchmod(fd, PRIVATE_FILE_MODE)
+    with os.fdopen(fd, 'wb' if isinstance(data, bytes) else 'w') as f:
+        f.write(data)
+
 
 def create_RSA_keypair(path):
     '''Creates and returns an RSA keypair and writes the private key to disk.
@@ -659,6 +678,7 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     output = render_template('server.conf', output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/tcp-server.env'.format(result_dir), tcp_tunnel_network, tcp_context)
 
     udp_context = tcp_context
     udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
@@ -671,6 +691,15 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     output = render_template('server.conf', output=result_dir, **udp_context)
     with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/udp-server.env'.format(result_dir), udp_tunnel_network, udp_context)
+
+
+def write_daemon_env(path, tunnel_network, context):
+    '''Writes the values run.sh needs for one daemon. run.sh sources this
+    file, so only root may write it, and every value is shell-quoted.
+    '''
+    output = render_template('server.env', tunnel_network_cidr=str(tunnel_network), **context)
+    write_private_file(path, output)
 
 
 def create_client_config_dir(daemon_dir):

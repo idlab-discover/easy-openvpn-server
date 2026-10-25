@@ -179,6 +179,12 @@ scenario_ccd() {
     wait_for_daemons
 }
 
+# 7. File permissions.
+scenario_hygiene() {
+    log "Scenario 7: file permissions"
+    check "the values run.sh sources are only writable by root" daemon_env_files_are_private
+}
+
 # 2. A fresh install of the snap under test works, and new configs connect.
 scenario_fresh_install() {
     log "Scenario 2: fresh install"
@@ -218,5 +224,6 @@ scenario_upgrade
 scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
+    scenario_hygiene
     scenario_fresh_install
 fi
