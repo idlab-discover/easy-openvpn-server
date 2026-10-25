@@ -573,6 +573,14 @@ def strtobool(value):
     raise ValueError("invalid truth value {!r}".format(value))
 
 
+def is_truth_value(value):
+    try:
+        strtobool(value)
+        return True
+    except ValueError:
+        return False
+
+
 def get_push_default_gateway():
     push_default_gateway = get_config("push-default-gateway")
     if push_default_gateway:
@@ -600,7 +608,7 @@ def get_client_to_client():
     "allow-legacy" when it's only allowed because this install is older than
     the `firewall.client-to-client` setting.
     '''
-    value = get_config("firewall.client-to-client")
+    value = get_validated_config("firewall.client-to-client", is_truth_value, "true or false")
     if value:
         return "allow" if strtobool(value) else "block"
     if strtobool(get_config("internal.legacy-client-to-client") or "false"):

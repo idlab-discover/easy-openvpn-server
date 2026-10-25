@@ -245,6 +245,8 @@ scenario_hygiene() {
 
     check_not "public-address with a newline is rejected" \
         lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=$'vpn.example.com\nscript-security 2'
+    check_not "firewall.client-to-client that isn't true or false is rejected" \
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server firewall.client-to-client=maybe
     check_not "additional-search-domains with a quote is rejected" \
         lxc exec "$SERVER_VM" -- snap set easy-openvpn-server 'additional-search-domains=x"y'
     check "a valid public-address is accepted" lxc exec "$SERVER_VM" -- snap set easy-openvpn-server public-address=vpn.example.com
