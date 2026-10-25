@@ -32,7 +32,7 @@ jobs:
       matrix:
         # snapcrafters/ci/get-architectures only reads `platforms` for core24,
         # so keep this in sync with `platforms` in snapcraft.yaml.
-        architecture: [amd64, arm64, armhf, ppc64el, s390x, riscv64]
+        architecture: [amd64, arm64, armhf, ppc64el, s390x]
     steps:
       - name: 🚢 Release to latest/candidate
         uses: snapcrafters/ci/release-to-candidate@main
@@ -74,7 +74,7 @@ jobs:
       - name: 📣 Create call for testing
         uses: snapcrafters/ci/call-for-testing@main
         with:
-          architectures: amd64 arm64 armhf ppc64el s390x riscv64
+          architectures: amd64 arm64 armhf ppc64el s390x
           github-token: ${{ secrets.GITHUB_TOKEN }}
           testing-instructions: |
             The automated tests passed on amd64. To test on your server:
