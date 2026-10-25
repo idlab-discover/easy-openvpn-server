@@ -29,7 +29,8 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 fi    
 
 # Values the CLI (cli.py) wrote for this daemon: TUNNEL_NETWORK,
-# TUNNEL_NETWORK_6 and DNS_SERVERS (the nameservers pushed to clients).
+# TUNNEL_NETWORK_6, DNS_SERVERS (the nameservers pushed to clients),
+# CLIENT_TO_CLIENT and ALL_TUNNEL_NETWORKS (of both daemons, IPv4 and IPv6).
 # Only root can write this file.
 ENV_FILE="${CONFIG_FILE%.conf}.env"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -40,6 +41,7 @@ fi
 source "$ENV_FILE"
 echo "tunnel networks: ${TUNNEL_NETWORK} ${TUNNEL_NETWORK_6}"
 echo "dns servers: ${DNS_SERVERS[*]}"
+echo "client-to-client: ${CLIENT_TO_CLIENT}"
 
 # Stage packages don't get the `iptables` command that update-alternatives
 # normally sets up, so call the nft backend directly (core22's base also used it).
@@ -107,6 +109,19 @@ setup_chain() {
     do
         "$cmd" -A "$CHAIN" -d "$dest" -j REJECT
     done
+    # Traffic to other VPN clients, of this server or the other one. Match
+    # their networks rather than `-o tun+`: the host may have other tunnels
+    # (e.g. another VPN) that VPN clients are allowed to use.
+    if [[ "$CLIENT_TO_CLIENT" == block ]]
+    then
+        for dest in "${ALL_TUNNEL_NETWORKS[@]}"
+        do
+            if in_family "$family" "$dest"
+            then
+                "$cmd" -A "$CHAIN" -d "$dest" -j REJECT
+            fi
+        done
+    fi
     remove_rule "$cmd" -A FORWARD -s "$net" -j "$CHAIN"
     "$cmd" -I FORWARD -s "$net" -j "$CHAIN" -m comment --comment "$COMMENT"
 }

@@ -350,6 +350,47 @@ fw_rule_count() {
     [[ "$forward" == "$n" && "$nat" == "$n" && "$chains" == "$n" ]]
 }
 
+client_vpn_ip() {
+    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | awk '{print $3}'
+}
+
+# Connect eovpn-client-2404-vm and eovpn-client-2604-vm with the same config.
+client_vpn_connect_pair() {
+    client_vpn_connect eovpn-client-2404-vm "$1" && client_vpn_connect eovpn-client-2604-vm "$1"
+}
+
+client_vpn_disconnect_pair() {
+    client_vpn_disconnect eovpn-client-2404-vm
+    client_vpn_disconnect eovpn-client-2604-vm
+}
+
+# True when eovpn-client-2404-vm can ping eovpn-client-2604-vm over the VPN.
+client_vms_reach_each_other_via_vpn() {
+    local ip
+    ip="$(client_vpn_ip eovpn-client-2604-vm)"
+    [[ -n "$ip" ]] && lxc exec eovpn-client-2404-vm -- ping -c1 -W2 "$ip" >/dev/null 2>&1
+}
+
+# check_client_to_client <allowed|blocked> <description> <ovpn file>
+check_client_to_client() {
+    if require "eovpn-client-2404-vm and eovpn-client-2604-vm connect" client_vpn_connect_pair "$3"; then
+        if [[ "$1" == allowed ]]; then
+            check "$2" client_vms_reach_each_other_via_vpn
+        else
+            check_not "$2" client_vms_reach_each_other_via_vpn
+        fi
+    fi
+    client_vpn_disconnect_pair
+}
+
+C2C_WARNING="Clients can reach each other over the VPN"
+
+
+warning_in_cli() {
+    lxc exec "$SERVER_VM" -- easy-openvpn-server list-clients 2>&1 | cat | grep "$C2C_WARNING" >/dev/null
+}
+
+
 # run.sh sources these files as root, so only root may write them.
 daemon_env_files_are_private() {
     local stats

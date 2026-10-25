@@ -548,6 +548,14 @@ def strtobool(value):
     raise ValueError("invalid truth value {!r}".format(value))
 
 
+def is_truth_value(value):
+    try:
+        strtobool(value)
+        return True
+    except ValueError:
+        return False
+
+
 def get_push_default_gateway():
     push_default_gateway = get_config("push-default-gateway")
     if push_default_gateway:
@@ -555,11 +563,61 @@ def get_push_default_gateway():
     else:
         set_config("push-default-gateway", "True")
         return True
+
+
+def migrate_config(result_dir):
+    '''One-time changes to the config of existing installs. Runs before
+    anything else in `setup`, so `ca.key` only exists on upgrades.
+    '''
+    if get_config("internal.config-generation"):
+        return
+    # Clients could always reach each other. New installs block this, but
+    # keep it working on existing installs.
+    is_upgrade = os.path.isfile("{}/ca.key".format(result_dir))
+    set_config("internal.legacy-client-to-client", str(is_upgrade))
+    set_config("internal.config-generation", "1")
+
+
+def get_client_to_client():
+    '''Returns whether VPN clients can reach each other: "allow", "block", or
+    "allow-legacy" when it's only allowed because this install is older than
+    the `firewall.client-to-client` setting.
+    '''
+    value = get_validated_config("firewall.client-to-client", is_truth_value, "true or false")
+    if value:
+        return "allow" if strtobool(value) else "block"
+    if strtobool(get_config("internal.legacy-client-to-client") or "false"):
+        return "allow-legacy"
+    return "block"
+
+
+def get_warnings():
+    '''Warnings shown by every `easy-openvpn-server` command.
+    '''
+    warnings = []
+    if get_client_to_client() == "allow-legacy":
+        warnings.append(
+            "Clients can reach each other over the VPN (kept from your previous version). "
+            "New installs block this. Run `sudo snap set easy-openvpn-server "
+            "firewall.client-to-client=false` to block it, or `=true` to keep it and hide "
+            "this warning.")
+    return warnings
 #
 #
 # Snapcraft utility functions
 #
 #
+
+
+def get_validated_config(key, validate, description):
+    '''Returns the value of a snap setting, or exits with an error when
+    `validate` rejects it. In the configure hook, that makes `snap set` fail.
+    '''
+    value = get_config(key)
+    if value and not validate(value):
+        logging.error("Invalid value for {}: {!r}. It should be {}.".format(key, value, description))
+        sys.exit(1)
+    return value
 
 
 def get_config(key):
@@ -674,6 +732,11 @@ def create_server_config(result_dir, status_dir, daemon_dir):
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
         'tunnel_network_v6': str(tcp_tunnel_network_v6),
+        'client_to_client': get_client_to_client(),
+        # Pushed when clients can reach each other, so this also works without
+        # the default gateway.
+        'all_tunnel_networks': [tcp_tunnel_network, udp_tunnel_network],
+        'all_tunnel_networks_v6': [tcp_tunnel_network_v6, udp_tunnel_network_v6],
     }
     output = render_template('server.conf', output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
@@ -820,6 +883,8 @@ def cli(ctx):
     ctx.obj["result_dir"] = os.environ['SNAP_USER_DATA']
     ctx.obj["daemon_dir"] = os.environ['SNAP_COMMON']
     ctx.obj["status_dir"] = os.environ['SNAP_DATA']
+    for warning in get_warnings():
+        logging.warning(warning)
 
 
 @cli.command()
@@ -828,6 +893,7 @@ def setup(ctx):
     """Initialises OpenVPN config files, keys and CA.
     """
     logging.info("Generating config for vpn daemons.")
+    migrate_config(ctx.obj["result_dir"])
     create_ca(ctx.obj["result_dir"])
     create_crl(ctx.obj["result_dir"])
     create_psk(ctx.obj["result_dir"])

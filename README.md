@@ -89,6 +89,14 @@ sudo snap set easy-openvpn-server additional-search-domains="test"
 
 VPN clients can't reach the cloud metadata service of the server (for example `169.254.169.254`), because it hands out the server's cloud credentials.
 
+By default, VPN clients also can't reach each other. If you want them to, run
+
+```bash
+sudo snap set easy-openvpn-server firewall.client-to-client=true
+```
+
+> Note: on installs from before this setting existed, clients can reach each other, like they always could, and the snap shows a warning until you choose explicitly.
+
 ## Client-specific rules and access policies
 
 You can give individual clients specific policies by creating a file with the name of that client in the following directory.

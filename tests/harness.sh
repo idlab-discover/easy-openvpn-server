@@ -201,10 +201,37 @@ scenario_firewall() {
     wait_for_daemons
 }
 
-# 7. File permissions.
+# 6. Clients reaching each other: kept on upgrades (with a warning), and
+# controlled by the firewall.client-to-client setting.
+scenario_client_to_client() {
+    log "Scenario 6: client-to-client"
+    local cfg="$WORK/old-default-udp.ovpn"
+    check_client_to_client allowed "upgraded install: clients can still reach each other" "$cfg"
+    check "upgraded install: warning in CLI output" warning_in_cli
+
+    server_vm_exec snap set easy-openvpn-server firewall.client-to-client=false
+    wait_for_daemons
+    check_client_to_client blocked "client-to-client=false: clients can't reach each other" "$cfg"
+    check_not "client-to-client=false: other tunnels on the server aren't blocked (no -o tun+)" \
+        sh -c "lxc exec $SERVER_VM -- iptables -S eovpn-udp-server | grep -q -- '-o tun'"
+    check_not "client-to-client=false: no warning in CLI output" warning_in_cli
+
+    # Without the default gateway, clients need the pushed routes to the tunnel networks (#23).
+    server_vm_exec snap set easy-openvpn-server firewall.client-to-client=true push-default-gateway=False
+    wait_for_daemons
+    check_client_to_client allowed "client-to-client=true: clients reach each other without the default gateway" "$cfg"
+    check_not "client-to-client=true: no warning in CLI output" warning_in_cli
+    server_vm_exec snap set easy-openvpn-server push-default-gateway=True
+    wait_for_daemons
+}
+
+# 7. Client config files and input validation.
 scenario_hygiene() {
-    log "Scenario 7: file permissions"
+    log "Scenario 7: file permissions and input validation"
     check "the values run.sh sources are only writable by root" daemon_env_files_are_private
+
+    check_not "firewall.client-to-client that isn't true or false is rejected" \
+        lxc exec "$SERVER_VM" -- snap set easy-openvpn-server firewall.client-to-client=maybe
 }
 
 # 2. A fresh install of the snap under test works, and new configs connect.
@@ -238,6 +265,8 @@ scenario_fresh_install() {
         client_vpn_log eovpn-client-2604-vm >"$WORK/eovpn-client-2604-vm-new-tcp.log"
     fi
     client_vpn_disconnect eovpn-client-2604-vm
+    check_client_to_client blocked "fresh install: clients can't reach each other" "$WORK/new-default-udp.ovpn"
+    check_not "fresh install: no client-to-client warning" warning_in_cli
 }
 
 log "Work directory: $WORK"
@@ -247,6 +276,7 @@ scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
     scenario_firewall
+    scenario_client_to_client
     scenario_hygiene
     scenario_fresh_install
 fi

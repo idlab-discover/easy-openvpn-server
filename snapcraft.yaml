@@ -61,7 +61,9 @@ description: |
 
   **Firewall**
 
-  VPN clients can't reach the cloud metadata service of the server, because it hands out the server's cloud credentials.
+  VPN clients can't reach the cloud metadata service of the server, because it hands out the server's cloud credentials. By default, VPN clients also can't reach each other. If you want them to, run
+
+  `sudo snap set easy-openvpn-server firewall.client-to-client=true`
 
   **Client-specific rules and access policies**
 
