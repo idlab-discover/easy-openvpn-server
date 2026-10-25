@@ -83,12 +83,12 @@ add_rule() {
     "$cmd" "$@" -m comment --comment "$COMMENT"
 }
 
-# setup_chain <$IPTABLES|$IP6TABLES> <tunnel network> <blocked destinations...>
 # in_family <4|6> <address or network>
 in_family() {
     if [[ "$1" == 6 ]]; then [[ "$2" == *:* ]]; else [[ "$2" != *:* ]]; fi
 }
 
+# setup_chain <$IPTABLES|$IP6TABLES> <tunnel network> <blocked destinations...>
 setup_chain() {
     local cmd="$1" net="$2" dns dest family
     shift 2
