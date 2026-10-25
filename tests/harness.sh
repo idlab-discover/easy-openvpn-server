@@ -179,6 +179,28 @@ scenario_ccd() {
     wait_for_daemons
 }
 
+# 5. Firewall rules for traffic from VPN clients.
+scenario_firewall() {
+    log "Scenario 5: firewall"
+    if require "eovpn-client-2404-vm: default connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-default-udp.ovpn"; then
+        check "eovpn-client-2404-vm: lan VM is reachable through the VPN" client_reaches_lan_vm_via_vpn eovpn-client-2404-vm "$LAN_VM_IP"
+        check_not "eovpn-client-2404-vm: cloud metadata ($METADATA_IP) is blocked" client_reaches_lan_vm_via_vpn eovpn-client-2404-vm "$METADATA_IP"
+    fi
+    client_vpn_disconnect eovpn-client-2404-vm
+    check "DNS servers pushed to clients are exempt from the blocks" \
+        sh -c "lxc exec $SERVER_VM -- iptables -S eovpn-udp-server | grep -q -- '--dport 53 -j RETURN'"
+
+    server_vm_exec snap restart easy-openvpn-server >/dev/null
+    wait_for_daemons
+    check "no duplicate rules after a restart (iptables)" fw_rule_count iptables 2
+    check "no duplicate rules after a restart (ip6tables)" fw_rule_count ip6tables 2
+    server_vm_exec snap stop easy-openvpn-server >/dev/null
+    check "no rules left after stopping (iptables)" fw_rule_count iptables 0
+    check "no rules left after stopping (ip6tables)" fw_rule_count ip6tables 0
+    server_vm_exec snap start easy-openvpn-server >/dev/null
+    wait_for_daemons
+}
+
 # 7. File permissions.
 scenario_hygiene() {
     log "Scenario 7: file permissions"
@@ -224,6 +246,7 @@ scenario_upgrade
 scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
     scenario_ccd
+    scenario_firewall
     scenario_hygiene
     scenario_fresh_install
 fi

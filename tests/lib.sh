@@ -339,6 +339,17 @@ client_vpn_has_route() {
     lxc exec "$1" -- ip -4 route show "$2" | cat | grep tun0 >/dev/null
 }
 
+# fw_rule_count <iptables|ip6tables> <n>: true when there are exactly n of our
+# rules in FORWARD and n in nat POSTROUTING (one per daemon), and when there
+# are none, also no leftover chains.
+fw_rule_count() {
+    local cmd="$1" n="$2" forward nat chains
+    forward="$(lxc exec "$SERVER_VM" -- "$cmd" -S FORWARD | cat | grep -c 'easy-openvpn-server' || true)"
+    nat="$(lxc exec "$SERVER_VM" -- "$cmd" -t nat -S POSTROUTING | cat | grep -c 'easy-openvpn-server' || true)"
+    chains="$(lxc exec "$SERVER_VM" -- "$cmd" -S | cat | grep -c '^-N eovpn-' || true)"
+    [[ "$forward" == "$n" && "$nat" == "$n" && "$chains" == "$n" ]]
+}
+
 # run.sh sources these files as root, so only root may write them.
 daemon_env_files_are_private() {
     local stats

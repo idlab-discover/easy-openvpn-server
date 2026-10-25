@@ -85,6 +85,10 @@ You can specify additional search domains.
 sudo snap set easy-openvpn-server additional-search-domains="test"
 ```
 
+## Firewall
+
+VPN clients can't reach the cloud metadata service of the server (for example `169.254.169.254`), because it hands out the server's cloud credentials.
+
 ## Client-specific rules and access policies
 
 You can give individual clients specific policies by creating a file with the name of that client in the following directory.
