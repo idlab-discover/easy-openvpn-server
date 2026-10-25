@@ -19,7 +19,7 @@ description: |
 
   2. Export the client config.
 
-    `sudo easy-openvpn-server show-client default > default.ovpn`
+    `(umask 077; sudo easy-openvpn-server show-client default > default.ovpn)`
 
   3. Import the `.ovpn` config file into the VPN application of your device and connect!
 
@@ -41,7 +41,7 @@ description: |
 
   `sudo easy-openvpn-server add-client alice`
 
-  `sudo easy-openvpn-server show-client alice > alice.ovpn`
+  `(umask 077; sudo easy-openvpn-server show-client alice > alice.ovpn)`
 
   `sudo easy-openvpn-server remove-client alice`
 
@@ -59,6 +59,12 @@ description: |
 
   `sudo snap set easy-openvpn-server additional-search-domains="test"`
 
+  **Firewall**
+
+  VPN clients can't reach the cloud metadata service of the server, because it hands out the server's cloud credentials. By default, VPN clients also can't reach each other. If you want them to, run
+
+  `sudo snap set easy-openvpn-server firewall.client-to-client=true`
+
   **Client-specific rules and access policies**
 
   You can give individual clients specific policies by creating a file with the name of that client in the following directory.
@@ -69,7 +75,9 @@ description: |
 
   `ifconfig-push 10.8.1.1 10.8.1.2`
 
-  Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin/DEFAULT`
+  The address has to be inside the tunnel network of the server the client connects to. The udp and tcp servers each have their own network, which you can see with `sudo snap get easy-openvpn-server internal.udp.tun-network` and `sudo snap get easy-openvpn-server internal.tcp.tun-network`.
+
+  Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/DEFAULT`
 
 website: https://github.com/idlab-discover/easy-openvpn-server
 contact: https://github.com/idlab-discover/easy-openvpn-server/issues
@@ -77,9 +85,16 @@ issues: https://github.com/idlab-discover/easy-openvpn-server/issues
 source-code: https://github.com/idlab-discover/easy-openvpn-server
 license: Apache-2.0
 
-base: core22
+base: core26
 grade: stable
 confinement: strict
+
+platforms:
+  amd64:
+  arm64:
+  armhf:
+  ppc64el:
+  s390x:
 
 passthrough:
   system-usernames:
@@ -124,7 +139,7 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   easy-openvpn-server:
-    command: bin/setup.py
+    command: bin/easy-openvpn-server
     plugs:
       - network    
     environment:
@@ -146,22 +161,31 @@ parts:
     stage-packages:
       - openvpn
       - iptables
-      - libatm1
   scripts:
     plugin: dump
     source: scripts
     organize:
       "*": bin/
-  scripts-dependencies:
+  # core26 doesn't ship Python, so we bring our own.
+  python-runtime:
+    plugin: nil
+    stage-packages:
+      - libpython3.14-minimal
+      - libpython3.14-stdlib
+      - python3-minimal
+      - python3.14-minimal
+      - python3.14-venv
+  # The `easy-openvpn-server` command: a Python package with an entry point.
+  # On core26, the plugin points its shebang at the venv's interpreter.
+  cli:
+    after: [python-runtime]
     plugin: python
     source: easy-openvpn-server
-    python-requirements:
-      - requirements.txt 
     stage-packages:
       - iproute2
       # Dependencies for `cryptography` on non-amd64 systems.
       - libffi8
-      - libssl3
+      - libssl3t64
     build-packages:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential

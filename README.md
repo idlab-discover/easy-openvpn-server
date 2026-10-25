@@ -22,8 +22,9 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
 2. Copy the client config to your personal device.
 
    ```bash
-   # Run this on the _server_ to create the config file.
-   sudo easy-openvpn-server show-client default > default.ovpn
+   # Run this on the _server_ to create the config file. `umask 077` makes
+   # sure only you can read it: it contains the client's private key.
+   (umask 077; sudo easy-openvpn-server show-client default > default.ovpn)
    ```
 
    and from your device
@@ -32,6 +33,8 @@ It automatically generates `.ovpn` client config files that work on Linux, Mac a
    # Run this on the _client_ to download the config file.
    scp my-user@my-server:~/default.ovpn .
    ```
+
+   Then remove `default.ovpn` from the server.
 
 3. Import the `.ovpn` config file into the VPN application of your device.
 
@@ -47,7 +50,7 @@ The snap automatically creates a client profile and config with the name `defaul
 # Add the client
 sudo easy-openvpn-server add-client alice
 # Get the client config
-sudo easy-openvpn-server show-client alice > alice.ovpn
+(umask 077; sudo easy-openvpn-server show-client alice > alice.ovpn)
 # Remove the client
 sudo easy-openvpn-server remove-client alice
 ```
@@ -85,6 +88,18 @@ You can specify additional search domains.
 sudo snap set easy-openvpn-server additional-search-domains="test"
 ```
 
+## Firewall
+
+VPN clients can't reach the cloud metadata service of the server (for example `169.254.169.254`), because it hands out the server's cloud credentials.
+
+By default, VPN clients also can't reach each other. If you want them to, run
+
+```bash
+sudo snap set easy-openvpn-server firewall.client-to-client=true
+```
+
+> Note: on installs from before this setting existed, clients can reach each other, like they always could, and the snap shows a warning until you choose explicitly.
+
 ## Client-specific rules and access policies
 
 You can give individual clients specific policies by creating a file with the name of that client in the following directory.
@@ -99,7 +114,9 @@ For example, if you want the client `sysadmin` to always have the IP `10.8.1.1`,
 ifconfig-push 10.8.1.1 10.8.1.2
 ```
 
-> Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin/DEFAULT`
+The address has to be inside the tunnel network of the server the client connects to. The udp and tcp servers each have their own network, which you can see with `sudo snap get easy-openvpn-server internal.udp.tun-network` and `sudo snap get easy-openvpn-server internal.tcp.tun-network`.
+
+> Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/DEFAULT`
 
 ## FAQ
 

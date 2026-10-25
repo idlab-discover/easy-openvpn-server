@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-
 import datetime
-from distutils.util import strtobool
 import errno
 import grp
 from ipaddress import IPv4Address, IPv6Address, IPv6Network, ip_address, ip_network
@@ -11,6 +8,8 @@ import os
 from pathlib import Path
 import pwd
 import random
+import re
+import shlex
 import socket
 import stat
 import subprocess
@@ -27,7 +26,24 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from cryptography.x509 import load_pem_x509_certificate
 from cryptography.x509.oid import ExtendedKeyUsageOID
 from cryptography.x509.oid import NameOID
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+
+# The snap ships the templates in $SNAP/templates (the `templates` part).
+TEMPLATES_DIR = os.path.join(os.environ.get('SNAP', ''), 'templates')
+
+# One environment for all templates. StrictUndefined makes a variable that
+# isn't passed an error, instead of silently rendering it as empty.
+JINJA_ENV = Environment(
+    loader=FileSystemLoader(TEMPLATES_DIR),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    undefined=StrictUndefined)
+JINJA_ENV.filters['shell_quote'] = shlex.quote
+
+
+def render_template(name, **context):
+    return JINJA_ENV.get_template(name).render(**context)
 
 
 #
@@ -35,6 +51,23 @@ from jinja2 import Environment, FileSystemLoader
 # Certificate and key management
 #
 #
+
+# Only root may read or write files with secrets in them.
+PRIVATE_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR
+
+
+def write_private_file(path, data):
+    '''Writes `data` (str or bytes) to a file that only root can read. The
+    data is never in a file with wider permissions, not even briefly.
+    '''
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    # os.open's mode only applies to new files. Fix the mode of files from
+    # older versions too, before writing anything into them. (O_TRUNC has
+    # already emptied them.)
+    os.fchmod(fd, PRIVATE_FILE_MODE)
+    with os.fdopen(fd, 'wb' if isinstance(data, bytes) else 'w') as f:
+        f.write(data)
+
 
 def create_RSA_keypair(path):
     '''Creates and returns an RSA keypair and writes the private key to disk.
@@ -45,15 +78,12 @@ def create_RSA_keypair(path):
         key_size=4096,
         backend=default_backend()
     )
-    # Write the key to disk for safe keeping
-    with open(path, "wb") as f:
-        f.write(keypair.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        ))
-    # Make sure other users can't read the private key
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    # Write the key to disk for safe keeping. Only root may read it.
+    write_private_file(path, keypair.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
     return keypair
 
 
@@ -80,10 +110,10 @@ def create_ca(result_dir):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=True, path_length=None), critical=True,
     # Sign the certificate with the CA private key (self-signed)
@@ -123,10 +153,10 @@ def create_server_cert(result_dir):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         # Make it clear this is a server key.
         # More explanation:
@@ -188,10 +218,10 @@ def create_client_cert(result_dir, client_name):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
         # This certificate will be valid for about 100 years
-        datetime.datetime.utcnow() + datetime.timedelta(days=36500)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500)
     ).add_extension(
         x509.BasicConstraints(ca=False, path_length=None),
         critical=False,
@@ -238,8 +268,8 @@ def create_crl(result_dir):
         ca_key = load_pem_private_key(data, None, default_backend())
 
     builder = x509.CertificateRevocationListBuilder()
-    builder = builder.last_update(datetime.datetime.utcnow())
-    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
+    builder = builder.last_update(datetime.datetime.now(datetime.timezone.utc))
+    builder = builder.next_update(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500))
     builder = builder.issuer_name(ca_cert.issuer)
 
     cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
@@ -249,6 +279,9 @@ def create_crl(result_dir):
 
 
 def revoke_client_cert(result_dir, client_name):
+    '''Adds the client's certificate to the CRL. Returns False if the
+    certificate couldn't be found.
+    '''
     if not os.path.isfile("{}/crl.pem".format(result_dir)):
         create_crl(result_dir)
     
@@ -259,8 +292,8 @@ def revoke_client_cert(result_dir, client_name):
         try:
             cert_to_revoke_data = open("{}/client-configs/{}.crt.removed".format(result_dir, client_name),"rb").read()
         except FileNotFoundError:
-            logging.warning("Could not find client certificate, can't revoke client.")
-            return
+            logging.error("Could not find a certificate for client {}, can't revoke it.".format(client_name))
+            return False
 
     cert_to_revoke = x509.load_pem_x509_certificate(cert_to_revoke_data, backend=default_backend())
 
@@ -278,8 +311,8 @@ def revoke_client_cert(result_dir, client_name):
     # generate a new crl object
     builder = x509.CertificateRevocationListBuilder()
     builder = builder.issuer_name(crl.issuer)
-    builder = builder.last_update(crl.last_update)
-    builder = builder.next_update(datetime.datetime.utcnow() + datetime.timedelta(days=36500))
+    builder = builder.last_update(crl.last_update_utc)
+    builder = builder.next_update(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=36500))
 
     # add crl certificates from file to the new crl object
     for i in range(0,len(crl)):    
@@ -293,7 +326,7 @@ def revoke_client_cert(result_dir, client_name):
         revoked_cert = (
             x509.RevokedCertificateBuilder()
             .serial_number(cert_to_revoke.serial_number)
-            .revocation_date(datetime.datetime.utcnow())
+            .revocation_date(datetime.datetime.now(datetime.timezone.utc))
             .build(backend=default_backend())
         )
         
@@ -305,6 +338,7 @@ def revoke_client_cert(result_dir, client_name):
     cert_revocation_list = builder.sign(private_key=ca_key,algorithm=hashes.SHA256(),backend=default_backend())
     with open("{}/crl.pem".format(result_dir),"wb") as f:
         f.write(cert_revocation_list.public_bytes(serialization.Encoding.PEM))
+    return True
 
 
 def create_dh_params(result_dir):
@@ -326,7 +360,7 @@ def get_dh_params_path(result_dir):
         return "./dh4096.pem"
     else:
         set_config("dh-params-type", "rfc3526")
-        return "{}/templates/RFC3526-dh4096.pem".format(os.environ['SNAP'])
+        return "{}/RFC3526-dh4096.pem".format(TEMPLATES_DIR)
 
 
 def create_psk(result_dir):
@@ -373,8 +407,9 @@ def get_public_addresses():
     # Prefer ipv4 addresses, since more places are ipv4-only than ipv6-only
     public_addresses.sort(key=lambda x: x.version)
     # If user manually set `public-address` setting, prefer that one.
-    if get_config("public-address"):
-        public_addresses.insert(0, get_config("public-address"))
+    public_address = get_validated_config("public-address", is_hostname_or_ip, "a hostname or IP address")
+    if public_address:
+        public_addresses.insert(0, public_address)
     # Fallback to default ip when no public are found
     if len(public_addresses) == 0:
         public_addresses.append(IPv4Address(get_default_ip()))
@@ -401,11 +436,7 @@ def get_dns_info():
     info = parse_resolvconf('/etc/resolv.conf')
     # Often, resolf.conf will point to local resolver. If this resolver is
     # resolvd, we can scan its file. Otherwise, don't pass a nameserver.
-    loopback_ns = False
-    for ns_address in info['nameservers']:
-        ns_address = IPv4Address(ns_address)
-        if ns_address.is_loopback:
-            loopback_ns = True
+    loopback_ns = any(ns_address.is_loopback for ns_address in info['nameservers'])
 
     if loopback_ns:
         info['nameservers'] = []
@@ -417,7 +448,34 @@ def get_dns_info():
     return info
 
 
+# Used when the server has no IPv4 nameserver we can push.
+FALLBACK_DNS_SERVERS = ["208.67.222.222", "208.67.220.220"]  # OpenDNS
+
+
+def get_dns_servers(dns_info):
+    '''Returns the IPv4 and IPv6 nameservers to push to clients. Always
+    returns at least one IPv4 nameserver, so clients without IPv6 can
+    resolve names too.
+    '''
+    servers_v4 = []
+    servers_v6 = []
+    for address in dns_info.get('nameservers', []):
+        if address.is_loopback or (address.is_link_local and address.version == 6):
+            logging.info("Not pushing nameserver {}: clients can't reach it.".format(address))
+        elif address.version == 4:
+            servers_v4.append(str(address))
+        else:
+            servers_v6.append(str(address))
+    if not servers_v4:
+        logging.info("No IPv4 nameserver found, also pushing {}.".format(", ".join(FALLBACK_DNS_SERVERS)))
+        servers_v4 = list(FALLBACK_DNS_SERVERS)
+    return (servers_v4, servers_v6)
+
+
 def parse_resolvconf(resolv_path):
+    '''Returns the nameservers (as ip_address objects) and search domains of
+    a resolv.conf file. Skips nameservers that aren't plain IP addresses.
+    '''
     info = {
         "nameservers": []
     }
@@ -427,7 +485,10 @@ def parse_resolvconf(resolv_path):
         words = line.split()
         if len(words) > 1:
             if words[0] == "nameserver":
-                info['nameservers'].append(words[1])
+                try:
+                    info['nameservers'].append(ip_address(words[1]))
+                except ValueError:
+                    logging.info("Not using nameserver {}: not an IP address.".format(words[1]))
             elif words[0] == "search":
                 info['search'] = words[1:]
     return info
@@ -501,6 +562,25 @@ def pick_tun_networks_v6():
     return [tun1, tun2]
 
 
+def strtobool(value):
+    '''Same as the removed `distutils.util.strtobool`.
+    '''
+    value = value.lower()
+    if value in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    if value in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    raise ValueError("invalid truth value {!r}".format(value))
+
+
+def is_truth_value(value):
+    try:
+        strtobool(value)
+        return True
+    except ValueError:
+        return False
+
+
 def get_push_default_gateway():
     push_default_gateway = get_config("push-default-gateway")
     if push_default_gateway:
@@ -508,11 +588,77 @@ def get_push_default_gateway():
     else:
         set_config("push-default-gateway", "True")
         return True
+
+
+def migrate_config(result_dir):
+    '''One-time changes to the config of existing installs. Runs before
+    anything else in `setup`, so `ca.key` only exists on upgrades.
+    '''
+    if get_config("internal.config-generation"):
+        return
+    # Clients could always reach each other. New installs block this, but
+    # keep it working on existing installs.
+    is_upgrade = os.path.isfile("{}/ca.key".format(result_dir))
+    set_config("internal.legacy-client-to-client", str(is_upgrade))
+    set_config("internal.config-generation", "1")
+
+
+def get_client_to_client():
+    '''Returns whether VPN clients can reach each other: "allow", "block", or
+    "allow-legacy" when it's only allowed because this install is older than
+    the `firewall.client-to-client` setting.
+    '''
+    value = get_validated_config("firewall.client-to-client", is_truth_value, "true or false")
+    if value:
+        return "allow" if strtobool(value) else "block"
+    if strtobool(get_config("internal.legacy-client-to-client") or "false"):
+        return "allow-legacy"
+    return "block"
+
+
+def get_warnings():
+    '''Warnings shown by every `easy-openvpn-server` command.
+    '''
+    warnings = []
+    if get_client_to_client() == "allow-legacy":
+        warnings.append(
+            "Clients can reach each other over the VPN (kept from your previous version). "
+            "New installs block this. Run `sudo snap set easy-openvpn-server "
+            "firewall.client-to-client=false` to block it, or `=true` to keep it and hide "
+            "this warning.")
+    return warnings
 #
 #
 # Snapcraft utility functions
 #
 #
+
+
+HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}\.?$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$")
+
+
+def is_hostname_or_ip(value):
+    '''Values like this end up in OpenVPN config files, so anything else
+    (spaces, newlines, quotes) could add options to them.
+    '''
+    try:
+        ip_address(value)
+        return True
+    except ValueError:
+        return bool(HOSTNAME_RE.fullmatch(value))
+
+
+def get_validated_config(key, validate, description):
+    '''Returns the value of a snap setting, or exits with an error when
+    `validate` rejects it. In the configure hook, that makes `snap set` fail.
+    '''
+    value = get_config(key)
+    if value and not validate(value):
+        logging.error("Invalid value for {}: {!r}. It should be {}.".format(key, value, description))
+        sys.exit(1)
+    return value
 
 
 def get_config(key):
@@ -583,10 +729,14 @@ def get_ports():
 
 def create_server_config(result_dir, status_dir, daemon_dir):
     dns_info = get_dns_info()
+    (dns_servers_v4, dns_servers_v6) = get_dns_servers(dns_info)
     (tcp_tunnel_network, udp_tunnel_network, tcp_tunnel_network_v6, udp_tunnel_network_v6) = get_tun_networks(result_dir)
     (tcp_port, udp_port) = get_ports()
     dns_search_domains = dns_info.get('search', [])
-    dns_search_domains += get_config("additional-search-domains").split()
+    dns_search_domains += get_validated_config(
+        "additional-search-domains",
+        lambda value: all(HOSTNAME_RE.fullmatch(domain) for domain in value.split()),
+        "a space-separated list of domain names").split()
 
     # Make sure we don't advertise the networks of our public addresses
     public_addresses = []
@@ -620,24 +770,24 @@ def create_server_config(result_dir, status_dir, daemon_dir):
         'duplicate_cn': True,
         'push_dns': True,
         'push_default_gateway': get_push_default_gateway(),
-        # Default to OpenDNS when no nameservers were found
-        'dns_servers': dns_info.get('nameservers', ["208.67.222.222", "208.67.220.220"]),
+        # IPv4 first: clients without IPv6 have to be able to use the first one.
+        'dns_servers': dns_servers_v4,
+        'dns_servers_v6': dns_servers_v6,
         'dns_search_domains': dns_search_domains,
         'internal_networks': internal_networks,
         'tunnel_network': str(tcp_tunnel_network.network_address),
         'tunnel_netmask': str(tcp_tunnel_network.netmask),
         'tunnel_network_v6': str(tcp_tunnel_network_v6),
+        'client_to_client': get_client_to_client(),
+        # Pushed when clients can reach each other, so this also works without
+        # the default gateway.
+        'all_tunnel_networks': [tcp_tunnel_network, udp_tunnel_network],
+        'all_tunnel_networks_v6': [tcp_tunnel_network_v6, udp_tunnel_network_v6],
     }
-    import jinja2
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
-        trim_blocks=True,
-        lstrip_blocks=True,
-        undefined=jinja2.StrictUndefined)
-    template = j2_env.get_template('server.conf')
-    output = template.render(output=result_dir, **tcp_context)
+    output = render_template('server.conf', output=result_dir, **tcp_context)
     with open('{}/tcp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/tcp-server.env'.format(result_dir), tcp_tunnel_network, tcp_context)
 
     udp_context = tcp_context
     udp_context['status_file_path'] = "{}/udp-server-status.log".format(status_dir)
@@ -647,14 +797,18 @@ def create_server_config(result_dir, status_dir, daemon_dir):
     udp_context['tunnel_netmask'] = str(udp_tunnel_network.netmask)
     udp_context['tunnel_network_v6'] = str(udp_tunnel_network_v6)
 
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('server.conf')
-    output = template.render(output=result_dir, **udp_context)
+    output = render_template('server.conf', output=result_dir, **udp_context)
     with open('{}/udp-server.conf'.format(result_dir), 'w') as f:
         f.write(output)
+    write_daemon_env('{}/udp-server.env'.format(result_dir), udp_tunnel_network, udp_context)
+
+
+def write_daemon_env(path, tunnel_network, context):
+    '''Writes the values run.sh needs for one daemon. run.sh sources this
+    file, so only root may write it, and every value is shell-quoted.
+    '''
+    output = render_template('server.env', tunnel_network_cidr=str(tunnel_network), **context)
+    write_private_file(path, output)
 
 
 def create_client_config_dir(daemon_dir):
@@ -694,14 +848,10 @@ def create_client_config(result_dir, name):
         'key': client_key_str,
         'tls_auth': ta_key_str,
     }
-    j2_env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__),"../templates")),                                                                                                                            
-        trim_blocks=True,
-        lstrip_blocks=True)
-    template = j2_env.get_template('client.ovpn')
-    output = template.render(output=result_dir, **context)
-    with open("{}/client-configs/{}.ovpn".format(result_dir, name), 'w') as f:
-        f.write(output)
+    output = render_template('client.ovpn', output=result_dir, **context)
+    # The config contains the client's private key: only root may read it.
+    path = "{}/client-configs/{}.ovpn".format(result_dir, name)
+    write_private_file(path, output)
 
 
 def show_client_config(result_dir, name):
@@ -714,6 +864,7 @@ def show_client_config(result_dir, name):
             "Config for client {} does not appear to exist.\n"
             "You can create it by running\n"
             "\tsudo easy-openvpn-server add-client {}".format(name, name))
+        sys.exit(1)
 
 
 def get_clients(result_dir):
@@ -723,6 +874,22 @@ def get_clients(result_dir):
     clients = glob.glob(r'{}/client-configs/*.crt'.format(result_dir))
     clients = [os.path.splitext(os.path.basename(c))[0] for c in clients]
     return clients
+
+
+def warn_about_old_client_specific_configs(result_dir, daemon_dir):
+    '''Older versions also pointed OpenVPN at `client-configs/` for
+    client-specific config, but OpenVPN can't read that folder after dropping
+    privileges, so those files never had any effect. Tell users who put files
+    there where they should go now.
+    '''
+    old_dir = "{}/client-configs".format(result_dir)
+    old_files = [f for f in os.listdir(old_dir)
+                 if os.path.isfile(os.path.join(old_dir, f)) and "." not in f]
+    if old_files:
+        logging.warning(
+            "Found client-specific config in {old_dir}: {files}. These files are "
+            "not used. Move them to {daemon_dir}/ccd/ to apply them.".format(
+                old_dir=old_dir, files=", ".join(sorted(old_files)), daemon_dir=daemon_dir))
 
 
 def create_status_files(status_dir):
@@ -753,6 +920,38 @@ def create_status_files(status_dir):
 #
 
 
+CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+
+def new_client_name(ctx, param, value):
+    '''Names of new clients. A name is used in file paths and as the
+    certificate's common name (CN), which OpenVPN uses in places where odd
+    characters cause trouble: the status log separates fields with commas
+    without escaping them, and for ccd/ files OpenVPN replaces some
+    characters with '_'. Spaces and shell characters also break the
+    documented `show-client <name> > <name>.ovpn`. So only allow names that
+    work everywhere.
+    '''
+    if not CLIENT_NAME_RE.fullmatch(value) or value.endswith(".removed"):
+        raise click.BadParameter(
+            "use up to 64 letters, digits, '.', '-' and '_', starting with a letter or digit")
+    # ccd/DEFAULT is the config for all clients without a file of their own.
+    if value.upper() == "DEFAULT":
+        raise click.BadParameter("DEFAULT is reserved: ccd/DEFAULT is the config for all clients")
+    return value
+
+
+def existing_client_name(ctx, param, value):
+    '''Names of existing clients. Older versions accepted any name, and
+    existing clients can't be renamed without breaking them, so only reject
+    what is actually dangerous: names that point outside the client-configs
+    folder.
+    '''
+    if "/" in value or "\0" in value or value in (".", ".."):
+        raise click.BadParameter("not a valid client name")
+    return value
+
+
 @click.group()
 @click.pass_context
 def cli(ctx):
@@ -764,6 +963,8 @@ def cli(ctx):
     ctx.obj["result_dir"] = os.environ['SNAP_USER_DATA']
     ctx.obj["daemon_dir"] = os.environ['SNAP_COMMON']
     ctx.obj["status_dir"] = os.environ['SNAP_DATA']
+    for warning in get_warnings():
+        logging.warning(warning)
 
 
 @cli.command()
@@ -772,6 +973,7 @@ def setup(ctx):
     """Initialises OpenVPN config files, keys and CA.
     """
     logging.info("Generating config for vpn daemons.")
+    migrate_config(ctx.obj["result_dir"])
     create_ca(ctx.obj["result_dir"])
     create_crl(ctx.obj["result_dir"])
     create_psk(ctx.obj["result_dir"])
@@ -780,6 +982,7 @@ def setup(ctx):
     create_status_files(ctx.obj["status_dir"])
     create_client_config_dir(ctx.obj["daemon_dir"])
     create_client_configs_dir(ctx.obj["result_dir"])
+    warn_about_old_client_specific_configs(ctx.obj["result_dir"], ctx.obj["daemon_dir"])
     restart_daemons()
     create_client_cert(ctx.obj["result_dir"], "default")
     for client in get_clients(ctx.obj["result_dir"]):
@@ -788,7 +991,7 @@ def setup(ctx):
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=new_client_name)
 def add_client(ctx, client_name):
     """Creates a new client config with given name.
     """
@@ -796,13 +999,13 @@ def add_client(ctx, client_name):
     create_client_config(ctx.obj["result_dir"], client_name)
     logging.info(
         "Added {name}. You can copy its config using\n"
-        "\tsudo easy-openvpn-server show-client {name} > {name}.ovpn".format(
+        "\t(umask 077; sudo easy-openvpn-server show-client {name} > {name}.ovpn)".format(
             name=client_name))
 
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=existing_client_name)
 def show_client(ctx, client_name):
     """Outputs the client config file in `.ovpn` format to stdout.
     """
@@ -820,12 +1023,15 @@ def list_clients(ctx):
 
 @cli.command()
 @click.pass_context
-@click.argument('client_name')
+@click.argument('client_name', callback=existing_client_name)
 def remove_client(ctx, client_name):
     """Remove the client config.
     """
-    client_name = client_name.lower()
-    revoke_client_cert(ctx.obj["result_dir"], client_name)
+    if not revoke_client_cert(ctx.obj["result_dir"], client_name):
+        logging.error(
+            "Client {} was not removed. Run `sudo easy-openvpn-server list-clients` "
+            "to see the existing clients.".format(client_name))
+        sys.exit(1)
     try:
         os.rename(
             "{}/client-configs/{}.ovpn".format(ctx.obj["result_dir"], client_name),
@@ -847,5 +1053,11 @@ def remove_client(ctx, client_name):
     restart_daemons()
 
 
-if __name__ == "__main__":
+def main():
+    '''Entry point of the `easy-openvpn-server` command.
+    '''
     cli() #pylint: disable=E1123,E1120
+
+
+if __name__ == "__main__":
+    main()
