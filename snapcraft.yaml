@@ -163,13 +163,6 @@ parts:
     stage-packages:
       - openvpn
       - iptables
-    # The `iptables` command is normally set up by update-alternatives, which
-    # doesn't run for stage-packages. core22 provided it in the base; core26
-    # doesn't. Use the nft backend, like core22 did.
-    override-build: |
-      craftctl default
-      ln -sf iptables-nft "$CRAFT_PART_INSTALL/usr/sbin/iptables"
-      ln -sf ip6tables-nft "$CRAFT_PART_INSTALL/usr/sbin/ip6tables"
   scripts:
     plugin: dump
     source: scripts
