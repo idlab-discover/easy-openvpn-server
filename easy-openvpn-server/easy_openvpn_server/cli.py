@@ -736,6 +736,22 @@ def get_clients(result_dir):
     return clients
 
 
+def warn_about_old_client_specific_configs(result_dir, daemon_dir):
+    '''Older versions also pointed OpenVPN at `client-configs/` for
+    client-specific config, but OpenVPN can't read that folder after dropping
+    privileges, so those files never had any effect. Tell users who put files
+    there where they should go now.
+    '''
+    old_dir = "{}/client-configs".format(result_dir)
+    old_files = [f for f in os.listdir(old_dir)
+                 if os.path.isfile(os.path.join(old_dir, f)) and "." not in f]
+    if old_files:
+        logging.warning(
+            "Found client-specific config in {old_dir}: {files}. These files are "
+            "not used. Move them to {daemon_dir}/ccd/ to apply them.".format(
+                old_dir=old_dir, files=", ".join(sorted(old_files)), daemon_dir=daemon_dir))
+
+
 def create_status_files(status_dir):
     # This function currently doesn't work
     # https://forum.snapcraft.io/t/system-usernames/13386/4?u=galgalesh
@@ -791,6 +807,7 @@ def setup(ctx):
     create_status_files(ctx.obj["status_dir"])
     create_client_config_dir(ctx.obj["daemon_dir"])
     create_client_configs_dir(ctx.obj["result_dir"])
+    warn_about_old_client_specific_configs(ctx.obj["result_dir"], ctx.obj["daemon_dir"])
     restart_daemons()
     create_client_cert(ctx.obj["result_dir"], "default")
     for client in get_clients(ctx.obj["result_dir"]):

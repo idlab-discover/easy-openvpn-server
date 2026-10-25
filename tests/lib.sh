@@ -325,3 +325,16 @@ client_reaches_lan_vm_via_vpn() {
 snapcmd() {
     lxc exec "$SERVER_VM" -- easy-openvpn-server "$@" >/dev/null 2>&1
 }
+
+# The first three octets of the udp server's tunnel network, e.g. "10.12.34".
+udp_tun_prefix() {
+    lxc exec "$SERVER_VM" -- snap get easy-openvpn-server internal.udp.tun-network | cat | sed 's/\.0\/24$//'
+}
+
+client_vpn_has_ip() {
+    lxc exec "$1" -- ip -4 -br addr show tun0 | cat | grep -w "$2" >/dev/null
+}
+
+client_vpn_has_route() {
+    lxc exec "$1" -- ip -4 route show "$2" | cat | grep tun0 >/dev/null
+}

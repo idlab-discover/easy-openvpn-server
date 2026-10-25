@@ -108,6 +108,17 @@ scenario_upgrade() {
         fi
         check "export $name.ovpn from stable" export_client_config "$name" "$WORK/old-$name.ovpn"
     done
+    only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
+
+    # Older versions also used `client-configs/` as client-config-dir. Check
+    # that files there never had any effect, as the CLI's warning claims.
+    local bob_ip
+    bob_ip="$(udp_tun_prefix).101"
+    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > /root/snap/easy-openvpn-server/current/client-configs/bob"
+    if require "eovpn-client-2404-vm: bob connects to stable" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"; then
+        check_not "stable ignores client-configs/bob" client_vpn_has_ip eovpn-client-2404-vm "$bob_ip"
+    fi
+    client_vpn_disconnect eovpn-client-2404-vm
 
     if [[ -n "$UPGRADE_TO" ]]; then
         upgrade_snap "$UPGRADE_TO"
@@ -144,6 +155,28 @@ scenario_revocation() {
     check "eovpn-client-2404-vm: other client bob still connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"
     client_vpn_disconnect eovpn-client-2404-vm
     check_not "remove-client of an unknown client fails" snapcmd remove-client nobody
+}
+
+# 4. Client-specific config in $SNAP_COMMON/ccd is applied.
+scenario_ccd() {
+    log "Scenario 4: client-specific config"
+    local ccd="/var/snap/easy-openvpn-server/common/ccd" bob_ip
+    bob_ip="$(udp_tun_prefix).101"
+    server_vm_exec sh -c "echo 'ifconfig-push $bob_ip $(udp_tun_prefix).102' > $ccd/bob"
+    server_vm_exec sh -c "echo 'push \"route 192.0.2.0 255.255.255.0\"' > $ccd/DEFAULT"
+    if require "eovpn-client-2404-vm: bob connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-bob-udp.ovpn"; then
+        check "ccd/bob gives bob its fixed address" client_vpn_has_ip eovpn-client-2404-vm "$bob_ip"
+        check_not "ccd/DEFAULT doesn't apply to bob, who has his own file" client_vpn_has_route eovpn-client-2404-vm 192.0.2.0/24
+    fi
+    client_vpn_disconnect eovpn-client-2404-vm
+    if require "eovpn-client-2404-vm: default connects" client_vpn_connect eovpn-client-2404-vm "$WORK/old-default-udp.ovpn"; then
+        check "ccd/DEFAULT applies to clients without their own file" client_vpn_has_route eovpn-client-2404-vm 192.0.2.0/24
+    fi
+    client_vpn_disconnect eovpn-client-2404-vm
+    server_vm_exec rm -f "$ccd/bob" "$ccd/DEFAULT"
+    check "setup warns about files in the old client-configs folder" \
+        sh -c "lxc exec $SERVER_VM -- easy-openvpn-server setup 2>&1 | grep -q 'client-specific config'"
+    wait_for_daemons
 }
 
 # 2. A fresh install of the snap under test works, and new configs connect.
@@ -184,5 +217,6 @@ setup_topology
 scenario_upgrade
 scenario_revocation
 if [[ -n "$UPGRADE_TO" ]]; then
+    scenario_ccd
     scenario_fresh_install
 fi

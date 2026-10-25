@@ -99,7 +99,9 @@ For example, if you want the client `sysadmin` to always have the IP `10.8.1.1`,
 ifconfig-push 10.8.1.1 10.8.1.2
 ```
 
-> Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/sysadmin/DEFAULT`
+The address has to be inside the tunnel network of the server the client connects to. The udp and tcp servers each have their own network, which you can see with `sudo snap get easy-openvpn-server internal.udp.tun-network` and `sudo snap get easy-openvpn-server internal.tcp.tun-network`.
+
+> Note: if you want to change the default config for all clients, you can add these changes in the file `/var/snap/easy-openvpn-server/common/ccd/DEFAULT`
 
 ## FAQ
 
