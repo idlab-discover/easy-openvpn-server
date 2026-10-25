@@ -77,9 +77,16 @@ issues: https://github.com/idlab-discover/easy-openvpn-server/issues
 source-code: https://github.com/idlab-discover/easy-openvpn-server
 license: Apache-2.0
 
-base: core22
+base: core26
 grade: stable
 confinement: strict
+
+platforms:
+  amd64:
+  arm64:
+  armhf:
+  ppc64el:
+  s390x:
 
 passthrough:
   system-usernames:
@@ -124,7 +131,7 @@ apps:
     environment:
       LD_PRELOAD: "$SNAP/wraplib.so"
   easy-openvpn-server:
-    command: bin/setup.py
+    command: bin/easy-openvpn-server
     plugs:
       - network    
     environment:
@@ -146,22 +153,31 @@ parts:
     stage-packages:
       - openvpn
       - iptables
-      - libatm1
   scripts:
     plugin: dump
     source: scripts
     organize:
       "*": bin/
-  scripts-dependencies:
+  # core26 doesn't ship Python, so we bring our own.
+  python-runtime:
+    plugin: nil
+    stage-packages:
+      - libpython3.14-minimal
+      - libpython3.14-stdlib
+      - python3-minimal
+      - python3.14-minimal
+      - python3.14-venv
+  # The `easy-openvpn-server` command: a Python package with an entry point.
+  # On core26, the plugin points its shebang at the venv's interpreter.
+  cli:
+    after: [python-runtime]
     plugin: python
     source: easy-openvpn-server
-    python-requirements:
-      - requirements.txt 
     stage-packages:
       - iproute2
       # Dependencies for `cryptography` on non-amd64 systems.
       - libffi8
-      - libssl3
+      - libssl3t64
     build-packages:
       # Dependencies for building `cryptography` on non-amd64 systems.
       - build-essential

@@ -132,6 +132,42 @@ scenario_upgrade() {
     client_vpn_disconnect eovpn-client-2404-vm
 }
 
+# 2. A fresh install of the snap under test works, and new configs connect.
+scenario_fresh_install() {
+    log "Scenario 2: fresh install"
+    server_vm_exec snap remove --purge easy-openvpn-server >/dev/null
+    if [[ -f "$UPGRADE_TO" ]]; then
+        lx file push "$UPGRADE_TO" "$SERVER_VM/root/under-test.snap"
+        server_vm_exec snap install --dangerous /root/under-test.snap >/dev/null
+        # Auto-connect doesn't apply to local snaps.
+        connect_interfaces
+        wait_for_daemons
+    else
+        install_snap_from_store "$UPGRADE_TO"
+    fi
+    if ! require "export default.ovpn from fresh install" export_client_config default "$WORK/new-default.ovpn"; then return 0; fi
+    only_proto udp "$WORK/new-default.ovpn" "$WORK/new-default-udp.ovpn"
+    only_proto tcp "$WORK/new-default.ovpn" "$WORK/new-default-tcp.ovpn"
+    local c
+    for c in "${CLIENT_VMS[@]}"; do
+        if require "$c: new default.ovpn connects over udp" client_vpn_connect "$c" "$WORK/new-default-udp.ovpn"; then
+            check "$c: reaches lan VM through the VPN (udp, new config)" client_reaches_lan_vm_via_vpn "$c" "$LAN_VM_IP"
+        else
+            client_vpn_log "$c" >"$WORK/$c-new-udp.log"
+        fi
+        client_vpn_disconnect "$c"
+    done
+    if require "eovpn-client-2604-vm: new default.ovpn connects over tcp" client_vpn_connect eovpn-client-2604-vm "$WORK/new-default-tcp.ovpn"; then
+        check "eovpn-client-2604-vm: reaches lan VM through the VPN (tcp, new config)" client_reaches_lan_vm_via_vpn eovpn-client-2604-vm "$LAN_VM_IP"
+    else
+        client_vpn_log eovpn-client-2604-vm >"$WORK/eovpn-client-2604-vm-new-tcp.log"
+    fi
+    client_vpn_disconnect eovpn-client-2604-vm
+}
+
 log "Work directory: $WORK"
 setup_topology
 scenario_upgrade
+if [[ -n "$UPGRADE_TO" ]]; then
+    scenario_fresh_install
+fi
