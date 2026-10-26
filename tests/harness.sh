@@ -41,6 +41,7 @@ source "$HERE/lib.sh"
 
 UPGRADE_TO=""
 KEEP=false
+STABLE_HAS_ODD_NAME=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --snap)
@@ -72,8 +73,14 @@ done
 
 WORK="$(mktemp -d -t eovpn-harness.XXXXXX)"
 
+# When `set -e` stops the harness inside a command with `2>/dev/null`, the
+# EXIT trap inherits that redirect. Keep the real stderr, so finish() can
+# always say why the harness stopped.
+exec 3>&2
+
 finish() {
     local rc=$?
+    exec 2>&3
     if [[ $FAILED -gt 0 || $rc -ne 0 ]] && vm_exists "$SERVER_VM"; then
         lxc exec "$SERVER_VM" -- journalctl -u "snap.easy-openvpn-server.*" --no-pager 2>/dev/null |
             cat >"$WORK/server-journal.log" || true
@@ -100,15 +107,20 @@ trap finish EXIT
 scenario_upgrade() {
     log "Scenario 1: upgrade"
     install_snap_from_store latest/stable
-    # The snap creates `default` itself. Older versions accepted any client
-    # name; scenario 7 checks that "odd name" can still be removed.
+    # The snap creates `default` itself.
     local name
-    for name in default Alice bob "odd name"; do
+    for name in default Alice bob; do
         if [[ "$name" != default ]]; then
             server_vm_exec easy-openvpn-server add-client "$name" >/dev/null 2>&1
         fi
         check "export $name.ovpn from stable" export_client_config "$name" "$WORK/old-$name.ovpn"
     done
+    # Versions before 0.4 accepted any client name; scenario 7 checks that
+    # "odd name" can still be removed. Newer versions reject it.
+    if server_vm_exec easy-openvpn-server add-client "odd name" >/dev/null 2>&1; then
+        STABLE_HAS_ODD_NAME=true
+        check "export odd name.ovpn from stable" export_client_config "odd name" "$WORK/old-odd name.ovpn"
+    fi
     only_proto udp "$WORK/old-bob.ovpn" "$WORK/old-bob-udp.ovpn"
 
     # Older versions also used `client-configs/` as client-config-dir. Check
@@ -241,8 +253,10 @@ scenario_hygiene() {
     check_not "add-client rejects a name with a space" snapcmd add-client "new name"
     check_not "add-client rejects DEFAULT, the name of the config for all clients" snapcmd add-client Default
     check "add-client accepts a normal name" snapcmd add-client Carol.laptop-2
-    check "a client with an odd name from an older version can still be removed" \
-        snapcmd remove-client "odd name"
+    if [[ "$STABLE_HAS_ODD_NAME" == true ]]; then
+        check "a client with an odd name from an older version can still be removed" \
+            snapcmd remove-client "odd name"
+    fi
     check_not "show-client of an unknown client fails" snapcmd show-client nobody
     check_not "show-client rejects a path" snapcmd show-client ../ca
 
