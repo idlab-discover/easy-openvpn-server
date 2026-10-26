@@ -40,7 +40,7 @@ jobs:
       - name: 🚢 Release to latest/candidate
         id: release
         continue-on-error: true
-        uses: snapcrafters/ci/release-to-candidate@main
+        uses: snapcrafters/ci/release-to-candidate@8cea2c922e4e3cf51728bbed52d65da5b6dcb97e # main
         with:
           architecture: ${{ matrix.architecture }}
           launchpad-token: ${{ secrets.LP_BUILD_SECRET }}
@@ -51,7 +51,7 @@ jobs:
         run: sleep 300
       - name: 🚢 Release to latest/candidate (retry)
         if: steps.release.outcome == 'failure'
-        uses: snapcrafters/ci/release-to-candidate@main
+        uses: snapcrafters/ci/release-to-candidate@8cea2c922e4e3cf51728bbed52d65da5b6dcb97e # main
         with:
           architecture: ${{ matrix.architecture }}
           launchpad-token: ${{ secrets.LP_BUILD_SECRET }}
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 📣 Create call for testing
-        uses: snapcrafters/ci/call-for-testing@main
+        uses: snapcrafters/ci/call-for-testing@8cea2c922e4e3cf51728bbed52d65da5b6dcb97e # main
         with:
           architectures: amd64 arm64 armhf ppc64el s390x
           github-token: ${{ secrets.GITHUB_TOKEN }}
