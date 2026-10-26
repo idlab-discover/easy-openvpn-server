@@ -34,7 +34,23 @@ jobs:
         # so keep this in sync with `platforms` in snapcraft.yaml.
         architecture: [amd64, arm64, armhf, ppc64el, s390x]
     steps:
+      # Launchpad sometimes fails a remote build before it starts ("Could not
+      # find repository at path ..."), for all architectures at once. Try once
+      # more after a pause before failing the job.
       - name: 🚢 Release to latest/candidate
+        id: release
+        continue-on-error: true
+        uses: snapcrafters/ci/release-to-candidate@main
+        with:
+          architecture: ${{ matrix.architecture }}
+          launchpad-token: ${{ secrets.LP_BUILD_SECRET }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          store-token: ${{ secrets.SNAP_STORE_CANDIDATE }}
+      - name: Wait before retrying
+        if: steps.release.outcome == 'failure'
+        run: sleep 300
+      - name: 🚢 Release to latest/candidate (retry)
+        if: steps.release.outcome == 'failure'
         uses: snapcrafters/ci/release-to-candidate@main
         with:
           architecture: ${{ matrix.architecture }}
