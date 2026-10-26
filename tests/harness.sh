@@ -73,8 +73,14 @@ done
 
 WORK="$(mktemp -d -t eovpn-harness.XXXXXX)"
 
+# When `set -e` stops the harness inside a command with `2>/dev/null`, the
+# EXIT trap inherits that redirect. Keep the real stderr, so finish() can
+# always say why the harness stopped.
+exec 3>&2
+
 finish() {
     local rc=$?
+    exec 2>&3
     if [[ $FAILED -gt 0 || $rc -ne 0 ]] && vm_exists "$SERVER_VM"; then
         lxc exec "$SERVER_VM" -- journalctl -u "snap.easy-openvpn-server.*" --no-pager 2>/dev/null |
             cat >"$WORK/server-journal.log" || true
